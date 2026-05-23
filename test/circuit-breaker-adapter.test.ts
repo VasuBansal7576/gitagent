@@ -80,6 +80,22 @@ describe("circuit breaker message adapter", () => {
 		);
 	});
 
+	it("fails loudly for non-object or unknown SDK messages", () => {
+		assert.throws(
+			() => adaptGCMessage(null as unknown as GCMessage),
+			(error: unknown) =>
+				error instanceof CircuitBreakerEventSchemaError &&
+				error.message === "GCMessage must be an object",
+		);
+
+		assert.throws(
+			() => adaptGCMessage({ type: "mystery" } as unknown as GCMessage),
+			(error: unknown) =>
+				error instanceof CircuitBreakerEventSchemaError &&
+				error.message === "Unsupported GCMessage type: mystery",
+		);
+	});
+
 	it("exposes a persisted event type for evidence records", () => {
 		const event: PersistedCircuitBreakerEvent = {
 			sessionId: "session-1",

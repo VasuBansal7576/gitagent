@@ -112,6 +112,48 @@ describe("circuit breaker tool-loop detector", () => {
 		assert.equal(detectToolLoop(events), null);
 	});
 
+	it("treats repeated tracked URLs as no new progress", () => {
+		const events = persisted([
+			toolUse("call-1", "search_docs", { query: "gitclaw sdk events" }),
+			toolResult("call-1", "search_docs", {
+				results: [{ url: "https://Example.com/docs?utm_source=agent&cache_bust=1#top" }],
+			}),
+			toolUse("call-2", "search_docs", { query: "gitclaw sdk events" }),
+			toolResult("call-2", "search_docs", {
+				results: [{ url: "https://example.com/docs?utm_medium=agent&timestamp=2#again" }],
+			}),
+			toolUse("call-3", "search_docs", { query: "gitclaw sdk events" }),
+			toolResult("call-3", "search_docs", {
+				results: [{ url: "https://example.com/docs?ts=3" }],
+			}),
+			toolUse("call-4", "search_docs", { query: "gitclaw sdk events" }),
+			toolResult("call-4", "search_docs", {
+				results: [{ url: "https://example.com/docs?utm_campaign=x" }],
+			}),
+		]);
+
+		const finding = detectToolLoop(events);
+
+		assert.ok(finding);
+		assert.equal(finding.resultDelta, 0);
+		assert.deepEqual(finding.resultItems, ["https://example.com/docs"]);
+	});
+
+	it("does not combine repeated calls across different tools", () => {
+		const events = persisted([
+			toolUse("call-1", "search_docs", { query: "gitclaw sdk events" }),
+			toolResult("call-1", "search_docs", { results: [{ url: "https://example.com/a" }] }),
+			toolUse("call-2", "read_docs", { query: "gitclaw sdk events" }),
+			toolResult("call-2", "read_docs", { results: [{ url: "https://example.com/a" }] }),
+			toolUse("call-3", "search_docs", { query: "gitclaw sdk events" }),
+			toolResult("call-3", "search_docs", { results: [{ url: "https://example.com/a" }] }),
+			toolUse("call-4", "read_docs", { query: "gitclaw sdk events" }),
+			toolResult("call-4", "read_docs", { results: [{ url: "https://example.com/a" }] }),
+		]);
+
+		assert.equal(detectToolLoop(events), null);
+	});
+
 	it("does not fire without paired tool results", () => {
 		const events = persisted([
 			toolUse("call-1", "search_docs", { query: "gitclaw sdk events" }),

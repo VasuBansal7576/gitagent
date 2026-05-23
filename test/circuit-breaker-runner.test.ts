@@ -70,6 +70,11 @@ describe("circuit breaker fixture runner", () => {
 				error instanceof CircuitBreakerEventSchemaError &&
 				error.message === "tool_use.toolCallId must be a non-empty string",
 		);
+
+		await assert.rejects(
+			() => access(join(rootDir, "memory", "circuit-breaker", "sessions", "malformed-session.jsonl")),
+			(error: unknown) => isMissingFile(error),
+		);
 	});
 
 	it("writes a cost anomaly intervention only after enough baseline samples exist", async () => {
@@ -222,4 +227,8 @@ function json(value: unknown, status = 200): Response {
 		status,
 		headers: { "content-type": "application/json" },
 	});
+}
+
+function isMissingFile(error: unknown): boolean {
+	return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }

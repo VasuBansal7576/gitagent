@@ -87,6 +87,7 @@ Build a GitClaw-native circuit breaker example that captures real SDK events, de
 | T14 | x | Implement honest calibration.md generation from intervention YAML records and wire it into runner outputs | V22,I.calibration,I.memory,I.cli,I.tests |
 | T15 | x | Promote statistical cost anomalies into targeted `agent.yaml` interventions while keeping low-sample warnings advisory | V13,V15,V23,I.patch,I.cli,I.tests |
 | T16 | x | Add a one-command fixture demo script that builds, runs loop/normal/cost evidence paths, and prints generated artifacts | V18,V19,V20,I.cli,I.memory |
+| T17 | x | TDD hardening pass for adapter errors, normalized result-delta loops, mixed-tool detector windows, malformed fixture atomicity, and idempotent patch planning | V3,V6,V8,V9,V16,I.adapter,I.detector,I.patch,I.cli,I.tests |
 
 ## §B
 

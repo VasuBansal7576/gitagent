@@ -2,7 +2,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import type { CircuitBreakerIntervention } from "../examples/circuit-breaker/intervention-writer.ts";
-import { planPatchForIntervention } from "../examples/circuit-breaker/patch-planner.ts";
+import {
+	applyPatchPlanToContent,
+	planPatchForIntervention,
+	renderGuardrailBlock,
+} from "../examples/circuit-breaker/patch-planner.ts";
 
 describe("circuit breaker patch planner", () => {
 	it("generates a targeted dry-run patch and PR body for tool loops", () => {
@@ -35,6 +39,19 @@ describe("circuit breaker patch planner", () => {
 		assert.match(plan.prTitle, /budget guardrail/);
 		assert.match(plan.prBody, /Actual cost: `\$2\.5000`/);
 		assert.match(plan.prBody, /Baseline samples: `5`/);
+	});
+
+	it("applies guardrails to target content only once", () => {
+		const first = applyPatchPlanToContent("# Rules\n", intervention());
+
+		assert.equal(first.changed, true);
+		assert.match(first.content, /Runaway Tool Guardrails/);
+
+		const second = applyPatchPlanToContent(first.content, intervention());
+
+		assert.equal(second.changed, false);
+		assert.equal(second.content, first.content);
+		assert.equal(countOccurrences(second.content, renderGuardrailBlock(intervention()).trimEnd()), 1);
 	});
 });
 
@@ -94,4 +111,8 @@ function costIntervention(): CircuitBreakerIntervention {
 		human_decision: null,
 		created_at: "2026-05-23T12:30:00.000Z",
 	};
+}
+
+function countOccurrences(content: string, needle: string): number {
+	return content.split(needle).length - 1;
 }
