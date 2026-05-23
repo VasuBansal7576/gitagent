@@ -71,7 +71,7 @@ Build a GitClaw-native circuit breaker example that captures real SDK events, de
 | T3 | x | Implement deterministic result-id extraction and `result_delta` calculation | V8,V9,V10,I.delta,I.tests |
 | T4 | x | Implement P0 tool-loop detector over normalized events with paired result checks and confidence output | V6,V7,V10,V11,I.detector,I.tests |
 | T5 | x | Implement intervention writer that saves YAML records under `memory/circuit-breaker/interventions/` | V11,V16,I.detector,I.memory,I.tests |
-| T6 | . | Implement targeted patch planner and dry-run PR body generation | V15,V16,I.patch,I.tests |
+| T6 | x | Implement targeted patch planner and dry-run PR body generation | V15,V16,I.patch,I.tests |
 | T7 | . | Implement fixture CLI path for loop, normal, cost, and malformed sessions | V18,I.cli,I.evidence,I.detector,I.patch,I.tests |
 | T8 | . | Implement live SDK capture path from GitClaw query to session JSONL and dry-run intervention | V1,V4,V5,V16,I.sdk,I.cli,I.evidence |
 | T9 | . | Add `skills/circuit-breaker/SKILL.md` with frontmatter and concise input/output contract | C1,C2,I.skill |
