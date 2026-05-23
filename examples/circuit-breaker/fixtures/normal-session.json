@@ -1,0 +1,65 @@
+{
+  "sessionId": "normal-session",
+  "messages": [
+    {
+      "type": "tool_use",
+      "toolCallId": "call-1",
+      "toolName": "search_docs",
+      "args": {
+        "query": "gitclaw sdk events"
+      }
+    },
+    {
+      "type": "tool_result",
+      "toolCallId": "call-1",
+      "toolName": "search_docs",
+      "content": "{\"results\":[{\"url\":\"https://example.com/a\"}]}",
+      "isError": false
+    },
+    {
+      "type": "tool_use",
+      "toolCallId": "call-2",
+      "toolName": "search_docs",
+      "args": {
+        "query": "gitclaw sdk events"
+      }
+    },
+    {
+      "type": "tool_result",
+      "toolCallId": "call-2",
+      "toolName": "search_docs",
+      "content": "{\"results\":[{\"url\":\"https://example.com/b\"}]}",
+      "isError": false
+    },
+    {
+      "type": "tool_use",
+      "toolCallId": "call-3",
+      "toolName": "search_docs",
+      "args": {
+        "query": "gitclaw sdk events"
+      }
+    },
+    {
+      "type": "tool_result",
+      "toolCallId": "call-3",
+      "toolName": "search_docs",
+      "content": "{\"results\":[{\"url\":\"https://example.com/c\"}]}",
+      "isError": false
+    },
+    {
+      "type": "tool_use",
+      "toolCallId": "call-4",
+      "toolName": "search_docs",
+      "args": {
+        "query": "gitclaw sdk events"
+      }
+    },
+    {
+      "type": "tool_result",
+      "toolCallId": "call-4",
+      "toolName": "search_docs",
+      "content": "{\"results\":[{\"url\":\"https://example.com/d\"}]}",
+      "isError": false
+    }
+  ]
+}

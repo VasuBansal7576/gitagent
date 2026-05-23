@@ -1,0 +1,80 @@
+{
+  "sessionId": "search-loop-session",
+  "messages": [
+    {
+      "type": "assistant",
+      "content": "Searching docs.",
+      "model": "claude-sonnet-4-20250514",
+      "provider": "anthropic",
+      "stopReason": "toolUse",
+      "usage": {
+        "inputTokens": 100,
+        "outputTokens": 20,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "totalTokens": 120,
+        "costUsd": 0.001
+      }
+    },
+    {
+      "type": "tool_use",
+      "toolCallId": "call-1",
+      "toolName": "search_docs",
+      "args": {
+        "query": "gitclaw sdk events"
+      }
+    },
+    {
+      "type": "tool_result",
+      "toolCallId": "call-1",
+      "toolName": "search_docs",
+      "content": "{\"results\":[{\"url\":\"https://example.com/a\"}]}",
+      "isError": false
+    },
+    {
+      "type": "tool_use",
+      "toolCallId": "call-2",
+      "toolName": "search_docs",
+      "args": {
+        "query": "gitclaw sdk events"
+      }
+    },
+    {
+      "type": "tool_result",
+      "toolCallId": "call-2",
+      "toolName": "search_docs",
+      "content": "{\"results\":[{\"url\":\"https://example.com/a\"}]}",
+      "isError": false
+    },
+    {
+      "type": "tool_use",
+      "toolCallId": "call-3",
+      "toolName": "search_docs",
+      "args": {
+        "query": "gitclaw sdk events"
+      }
+    },
+    {
+      "type": "tool_result",
+      "toolCallId": "call-3",
+      "toolName": "search_docs",
+      "content": "{\"results\":[{\"url\":\"https://example.com/a\"}]}",
+      "isError": false
+    },
+    {
+      "type": "tool_use",
+      "toolCallId": "call-4",
+      "toolName": "search_docs",
+      "args": {
+        "query": "gitclaw sdk events"
+      }
+    },
+    {
+      "type": "tool_result",
+      "toolCallId": "call-4",
+      "toolName": "search_docs",
+      "content": "{\"results\":[{\"url\":\"https://example.com/a\"}]}",
+      "isError": false
+    }
+  ]
+}
