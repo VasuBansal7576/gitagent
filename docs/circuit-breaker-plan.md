@@ -435,12 +435,14 @@ node --experimental-strip-types examples/circuit-breaker/run.ts \
 # Live mode around a real GitClaw run
 node --experimental-strip-types examples/circuit-breaker/run.ts \
   --agent-dir ./agents/research-agent \
+  --agent-name research-agent \
   --prompt "Research the same narrow topic until you have ten unique sources" \
   --dry-run
 
 # Live PR mode after dry-run evidence is correct
 GITHUB_TOKEN=ghp_... node --experimental-strip-types examples/circuit-breaker/run.ts \
   --agent-dir ./agents/research-agent \
+  --agent-name research-agent \
   --prompt "Research the same narrow topic until you have ten unique sources" \
   --open-pr \
   --github-repo YOUR_USERNAME/research-agent \

@@ -3,25 +3,28 @@ import type { CircuitBreakerIntervention } from "./intervention-writer.js";
 export interface PatchPlan {
 	target: string;
 	rationale: string;
+	contentBlock: string;
 	patch: string;
 	prTitle: string;
 	prBody: string;
 }
 
 export function planPatchForIntervention(intervention: CircuitBreakerIntervention): PatchPlan {
-	if (!["tool-loop-v1", "cost-spike-v1"].includes(intervention.detector)) {
+	if (intervention.detector !== "tool-loop-v1" && intervention.detector !== "cost-spike-v1") {
 		throw new Error(`No patch planner for detector: ${intervention.detector}`);
 	}
 
 	const target = intervention.action.patch_target || inferTarget(intervention);
 	const rationale = buildRationale(intervention);
-	const patch = buildPatch(intervention, target);
+	const contentBlock = renderPatchBlock(intervention);
+	const patch = buildPatch(contentBlock, target);
 	const prTitle = buildPrTitle(intervention);
 	const prBody = buildPrBody(intervention, rationale, patch);
 
 	return {
 		target,
 		rationale,
+		contentBlock,
 		patch,
 		prTitle,
 		prBody,
@@ -37,8 +40,8 @@ function inferTarget(intervention: CircuitBreakerIntervention): string {
 	return "RULES.md";
 }
 
-function buildPatch(intervention: CircuitBreakerIntervention, target: string): string {
-	const block = renderPatchBlock(intervention).trimEnd().split("\n").map((line) => `+${line}`).join("\n");
+function buildPatch(contentBlock: string, target: string): string {
+	const block = contentBlock.trimEnd().split("\n").map((line) => `+${line}`).join("\n");
 	return [
 		`--- a/${target}`,
 		`+++ b/${target}`,
@@ -82,11 +85,11 @@ function renderBudgetGuardrailBlock(intervention: CircuitBreakerIntervention): s
 	].join("\n");
 }
 
-export function applyPatchPlanToContent(content: string, intervention: CircuitBreakerIntervention): {
+export function applyPatchPlanToContent(content: string, patchPlan: PatchPlan): {
 	changed: boolean;
 	content: string;
 } {
-	const guardrailBlock = renderPatchBlock(intervention).trimEnd();
+	const guardrailBlock = patchPlan.contentBlock.trimEnd();
 	if (content.includes(guardrailBlock)) {
 		return { changed: false, content };
 	}

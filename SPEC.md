@@ -36,6 +36,8 @@ Build a GitClaw-native circuit breaker example that captures real SDK events, de
 | I.patch | `examples/circuit-breaker/patch-planner.ts` | maps findings to targeted patch plan, dry-run patch text, and PR body |
 | I.github | `examples/circuit-breaker/github-pr-writer.ts` | uses GitHub REST refs, contents, and pulls APIs to create/reuse reviewable PRs |
 | I.calibration | `examples/circuit-breaker/calibration.ts` | regenerates `memory/circuit-breaker/calibration.md` from intervention YAML outcomes |
+| I.identity | `examples/circuit-breaker/run-identity.ts` | derives agent name, model, and rules hash from run context |
+| I.lifecycle | `examples/circuit-breaker/run-lifecycle.ts` | owns ordered run execution: evidence, analysis, intervention, optional PR, calibration |
 | I.cli | `examples/circuit-breaker/run.ts` | supports `--fixture`, `--agent-dir`, `--prompt`, `--dry-run`, `--open-pr` |
 | I.skill | `skills/circuit-breaker/SKILL.md` | GitClaw skill with frontmatter and small input/output contract |
 | I.memory | `memory/circuit-breaker/` | durable `sessions/`, `interventions/`, `baselines/`, `calibration.md` artifacts |
@@ -66,6 +68,8 @@ Build a GitClaw-native circuit breaker example that captures real SDK events, de
 - V21: Live PR mode uses `GITHUB_TOKEN` plus `--github-repo OWNER/REPO`, creates/reuses a branch, patches only the planned target file, opens/reuses a PR, and rewrites the intervention record with the PR URL.
 - V22: Calibration is regenerated from intervention records; pending decisions are not counted as true or false positives, and precision is `N/A` until at least one human decision exists.
 - V23: Cost anomaly interventions are PR-capable only when the classification is statistical (`sample_count >= 5`); absolute budget warnings remain non-PR evidence.
+- V24: Run identity uses explicit CLI values when provided, otherwise derives agent name from `agentDir`, model from assistant usage, and rules hash from `RULES.md` when available.
+- V25: `run.ts` remains a CLI/capture wrapper; run ordering invariants live in `run-lifecycle.ts`.
 
 ## §T
 
@@ -88,6 +92,7 @@ Build a GitClaw-native circuit breaker example that captures real SDK events, de
 | T15 | x | Promote statistical cost anomalies into targeted `agent.yaml` interventions while keeping low-sample warnings advisory | V13,V15,V23,I.patch,I.cli,I.tests |
 | T16 | x | Add a one-command fixture demo script that builds, runs loop/normal/cost evidence paths, and prints generated artifacts | V18,V19,V20,I.cli,I.memory |
 | T17 | x | TDD hardening pass for adapter errors, normalized result-delta loops, mixed-tool detector windows, malformed fixture atomicity, and idempotent patch planning | V3,V6,V8,V9,V16,I.adapter,I.detector,I.patch,I.cli,I.tests |
+| T18 | x | Deepen architecture around run lifecycle, run identity, detector-specific interventions, patch-plan content application, and a thinner GitHub adapter | V21,V24,V25,I.identity,I.lifecycle,I.github,I.patch,I.tests |
 
 ## §B
 

@@ -91,13 +91,13 @@ export async function openGitHubPrForPatch(options: GitHubPrWriterOptions): Prom
 	}
 
 	const currentContent = Buffer.from(file.content.replace(/\s/g, ""), "base64").toString("utf8");
-	const patched = applyPatchPlanToContent(currentContent, options.intervention);
+	const patched = applyPatchPlanToContent(currentContent, options.patchPlan);
 	let commitSha: string | undefined;
 	if (patched.changed) {
 		const update = await api.putJson<UpdateFileResponse>(
 			`/repos/${repo.owner}/${repo.name}/contents/${encodeGitHubPath(options.patchPlan.target)}`,
 			{
-				message: `circuit-breaker: add guardrail for ${options.intervention.evidence.tool} loop`,
+				message: options.patchPlan.prTitle,
 				content: Buffer.from(patched.content, "utf8").toString("base64"),
 				sha: file.sha,
 				branch: branchName,

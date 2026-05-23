@@ -24,7 +24,7 @@ describe("circuit breaker patch planner", () => {
 
 	it("fails loudly for unsupported detectors", () => {
 		assert.throws(
-			() => planPatchForIntervention({ ...intervention(), detector: "unknown-detector" }),
+			() => planPatchForIntervention({ ...intervention(), detector: "unknown-detector" } as unknown as CircuitBreakerIntervention),
 			/No patch planner for detector: unknown-detector/,
 		);
 	});
@@ -42,12 +42,13 @@ describe("circuit breaker patch planner", () => {
 	});
 
 	it("applies guardrails to target content only once", () => {
-		const first = applyPatchPlanToContent("# Rules\n", intervention());
+		const plan = planPatchForIntervention(intervention());
+		const first = applyPatchPlanToContent("# Rules\n", plan);
 
 		assert.equal(first.changed, true);
 		assert.match(first.content, /Runaway Tool Guardrails/);
 
-		const second = applyPatchPlanToContent(first.content, intervention());
+		const second = applyPatchPlanToContent(first.content, plan);
 
 		assert.equal(second.changed, false);
 		assert.equal(second.content, first.content);

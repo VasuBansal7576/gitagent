@@ -69,6 +69,7 @@ Live mode captures a real GitClaw SDK run. This is the product proof path.
 npm run build
 node --experimental-strip-types examples/circuit-breaker/run.ts \
   --agent-dir ./agents/research-agent \
+  --agent-name research-agent \
   --prompt "Research the same narrow topic until you have ten unique sources" \
   --session-id demo-live-run \
   --dry-run
@@ -86,6 +87,7 @@ export GITHUB_TOKEN=ghp_...
 
 node --experimental-strip-types examples/circuit-breaker/run.ts \
   --agent-dir ./agents/research-agent \
+  --agent-name research-agent \
   --prompt "Research the same narrow topic until you have ten unique sources" \
   --session-id demo-live-run \
   --open-pr \
@@ -107,6 +109,10 @@ exist does it call GitHub.
 | `memory/circuit-breaker/interventions/<id>.yaml.pr.md` | PR body with exact evidence |
 | `memory/circuit-breaker/baselines/<key>.yaml` | cost baseline samples by agent, model, and rules hash |
 | `memory/circuit-breaker/calibration.md` | pending/merged/rejected intervention accuracy summary |
+
+`--agent-name` and `--rules-hash` can be passed explicitly. When omitted, the
+runner derives the agent name from `--agent-dir`, the model from assistant usage,
+and the rules hash from `RULES.md` when that file exists.
 
 ## GitHub Contract
 

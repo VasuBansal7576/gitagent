@@ -31,28 +31,14 @@ export interface CostAnomalyInterventionInput {
 	patchTarget?: string;
 }
 
-export interface CircuitBreakerIntervention {
+interface BaseIntervention {
 	id: string;
 	session_id: string;
 	agent: string;
 	model: string;
 	rules_hash: string;
-	detector: string;
+	detector: "tool-loop-v1" | "cost-spike-v1";
 	severity: string;
-	evidence: {
-		session_event_log: string;
-		event_indexes: number[];
-		tool?: string;
-		window_size?: number;
-		arg_similarity?: number;
-		result_delta?: number;
-		confidence?: number;
-		tool_call_ids?: string[];
-		actual_cost_usd?: number;
-		p95_baseline_usd?: number;
-		anomaly_ratio?: number;
-		baseline_samples?: number;
-	};
 	action: {
 		type: "pull_request";
 		status: "dry_run" | "opened_pr";
@@ -62,6 +48,36 @@ export interface CircuitBreakerIntervention {
 	human_decision: null;
 	created_at: string;
 }
+
+export interface ToolLoopIntervention extends BaseIntervention {
+	detector: "tool-loop-v1";
+	severity: "high";
+	evidence: {
+		session_event_log: string;
+		event_indexes: number[];
+		tool: string;
+		window_size: number;
+		arg_similarity: number;
+		result_delta: number;
+		confidence: number;
+		tool_call_ids: string[];
+	};
+}
+
+export interface CostAnomalyIntervention extends BaseIntervention {
+	detector: "cost-spike-v1";
+	severity: "medium";
+	evidence: {
+		session_event_log: string;
+		event_indexes: [];
+		actual_cost_usd: number;
+		p95_baseline_usd: number;
+		anomaly_ratio: number;
+		baseline_samples: number;
+	};
+}
+
+export type CircuitBreakerIntervention = ToolLoopIntervention | CostAnomalyIntervention;
 
 export interface WriteInterventionOptions {
 	rootDir?: string;
@@ -73,7 +89,7 @@ export interface WriteInterventionResult {
 	intervention: CircuitBreakerIntervention;
 }
 
-export function createToolLoopIntervention(input: ToolLoopInterventionInput): CircuitBreakerIntervention {
+export function createToolLoopIntervention(input: ToolLoopInterventionInput): ToolLoopIntervention {
 	const createdAt = normalizeCreatedAt(input.createdAt);
 	return {
 		id: `${formatInterventionTimestamp(createdAt)}-${input.finding.detector}`,
@@ -104,7 +120,7 @@ export function createToolLoopIntervention(input: ToolLoopInterventionInput): Ci
 	};
 }
 
-export function createCostAnomalyIntervention(input: CostAnomalyInterventionInput): CircuitBreakerIntervention {
+export function createCostAnomalyIntervention(input: CostAnomalyInterventionInput): CostAnomalyIntervention {
 	const createdAt = normalizeCreatedAt(input.createdAt);
 	return {
 		id: `${formatInterventionTimestamp(createdAt)}-cost-spike-v1`,

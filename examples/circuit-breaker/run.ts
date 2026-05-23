@@ -1,26 +1,17 @@
 #!/usr/bin/env node
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { GCMessage } from "../../src/sdk-types.js";
 import { adaptGCMessage, type CircuitBreakerEvent } from "./message-adapter.ts";
-import { getSessionEventLogPath, writeSessionEvents } from "./evidence-writer.ts";
-import { detectToolLoop } from "./detector.ts";
-import {
-	createCostAnomalyIntervention,
-	createToolLoopIntervention,
-	type CircuitBreakerIntervention,
-	writeInterventionRecord,
-} from "./intervention-writer.ts";
-import { planPatchForIntervention } from "./patch-planner.ts";
-import { analyzeCostAndUpdateBaseline, type CostClassification } from "./cost-baseline.ts";
-import { openGitHubPrForPatch, type GitHubPrResult } from "./github-pr-writer.ts";
-import { updateCalibration } from "./calibration.ts";
+import { executeCircuitBreakerRun, type CircuitBreakerRunSummary } from "./run-lifecycle.ts";
 
 export interface CircuitBreakerRunOptions {
 	fixture?: string;
 	agentDir?: string;
+	agentName?: string;
+	rulesHash?: string;
 	prompt?: string;
 	sessionId?: string;
 	messageSource?: AsyncIterable<GCMessage>;
@@ -34,19 +25,7 @@ export interface CircuitBreakerRunOptions {
 	rootDir?: string;
 }
 
-export interface CircuitBreakerRunSummary {
-	sessionId: string;
-	sessionEventLog: string;
-	normalizedEventCount: number;
-	interventionPath?: string;
-	patchPath?: string;
-	prBodyPath?: string;
-	findingCount: number;
-	costClassification?: CostClassification;
-	costBaselinePath?: string;
-	githubPr?: GitHubPrResult;
-	calibrationPath?: string;
-}
+export type { CircuitBreakerRunSummary };
 
 interface FixtureFile {
 	sessionId?: string;
@@ -54,14 +33,10 @@ interface FixtureFile {
 }
 
 export async function runCircuitBreaker(options: CircuitBreakerRunOptions): Promise<CircuitBreakerRunSummary> {
-	if (options.openPr && options.dryRun) {
-		throw new Error("--open-pr cannot be combined with --dry-run");
-	}
-
 	if (options.fixture) {
 		const fixture = await loadFixture(options.fixture);
 		const sessionId = options.sessionId ?? fixture.sessionId ?? sessionIdFromFixturePath(options.fixture);
-		return runNormalizedEvents({
+		return executeCircuitBreakerRun({
 			...options,
 			sessionId,
 			events: normalizeMessages(fixture.messages),
@@ -74,131 +49,10 @@ export async function runCircuitBreaker(options: CircuitBreakerRunOptions): Prom
 		messages.push(message);
 	}
 
-	return runNormalizedEvents({
+	return executeCircuitBreakerRun({
 		...options,
 		sessionId: options.sessionId ?? `live-${new Date().toISOString().replace(/\.\d{3}Z$/, "Z").replace(/:/g, "-")}`,
 		events: normalizeMessages(messages),
-	});
-}
-
-async function runNormalizedEvents(
-	options: CircuitBreakerRunOptions & { sessionId: string; events: CircuitBreakerEvent[] },
-): Promise<CircuitBreakerRunSummary> {
-	const rootDir = options.rootDir ?? process.cwd();
-	const evidence = await writeSessionEvents({ rootDir, sessionId: options.sessionId, events: options.events });
-	const relativeSessionLog = `memory/circuit-breaker/sessions/${options.sessionId}.jsonl`;
-	const costAnalysis = await analyzeCostIfPresent(rootDir, options.events);
-
-	const finding = detectToolLoop(evidence.events);
-	if (!finding) {
-		if (costAnalysis?.classification.type === "cost_anomaly") {
-			const intervention = createCostAnomalyIntervention({
-				sessionId: options.sessionId,
-				sessionEventLog: relativeSessionLog,
-				classification: costAnalysis.classification,
-			});
-			const written = await writeInterventionArtifacts({ options, rootDir, intervention });
-			return {
-				sessionId: options.sessionId,
-				sessionEventLog: evidence.path,
-				normalizedEventCount: evidence.events.length,
-				...written,
-				findingCount: 1,
-				costClassification: costAnalysis.classification,
-				costBaselinePath: costAnalysis.path,
-			};
-		}
-
-		const calibration = await updateCalibration(rootDir);
-		return {
-			sessionId: options.sessionId,
-			sessionEventLog: getSessionEventLogPath(options.sessionId, rootDir),
-			normalizedEventCount: evidence.events.length,
-			findingCount: 0,
-			costClassification: costAnalysis?.classification,
-			costBaselinePath: costAnalysis?.path,
-			calibrationPath: calibration.path,
-		};
-	}
-
-	const intervention = createToolLoopIntervention({
-		sessionId: options.sessionId,
-		sessionEventLog: relativeSessionLog,
-		finding,
-		status: "dry_run",
-	});
-	const written = await writeInterventionArtifacts({ options, rootDir, intervention });
-
-	return {
-		sessionId: options.sessionId,
-		sessionEventLog: evidence.path,
-		normalizedEventCount: evidence.events.length,
-		...written,
-		findingCount: 1,
-		costClassification: costAnalysis?.classification,
-		costBaselinePath: costAnalysis?.path,
-	};
-}
-
-async function writeInterventionArtifacts(input: {
-	options: CircuitBreakerRunOptions;
-	rootDir: string;
-	intervention: CircuitBreakerIntervention;
-}): Promise<Pick<
-	CircuitBreakerRunSummary,
-	"interventionPath" | "patchPath" | "prBodyPath" | "githubPr" | "calibrationPath"
->> {
-	const { options, rootDir, intervention } = input;
-	const written = await writeInterventionRecord({ rootDir, intervention });
-	const patchPlan = planPatchForIntervention(intervention);
-	const patchPath = `${written.path}.patch.diff`;
-	const prBodyPath = `${written.path}.pr.md`;
-	await writeFile(patchPath, patchPlan.patch, "utf8");
-	await writeFile(prBodyPath, patchPlan.prBody, "utf8");
-	let githubPr: GitHubPrResult | undefined;
-
-	if (options.openPr) {
-		githubPr = await openGitHubPrForPatch({
-			token: options.githubToken ?? process.env.GITHUB_TOKEN ?? "",
-			repository: options.githubRepository ?? process.env.TARGET_GITHUB_REPOSITORY ?? process.env.GITHUB_REPOSITORY ?? "",
-			intervention,
-			patchPlan,
-			baseBranch: options.baseBranch,
-			branchName: options.branchName,
-			fetchImpl: options.fetchImpl,
-		});
-		const openedIntervention = {
-			...intervention,
-			action: {
-				...intervention.action,
-				status: "opened_pr" as const,
-				pr_url: githubPr.url,
-			},
-		};
-		await writeInterventionRecord({ rootDir, intervention: openedIntervention });
-	}
-	const calibration = await updateCalibration(rootDir);
-
-	return {
-		interventionPath: written.path,
-		patchPath,
-		prBodyPath,
-		githubPr,
-		calibrationPath: calibration.path,
-	};
-}
-
-async function analyzeCostIfPresent(rootDir: string, events: CircuitBreakerEvent[]) {
-	const assistantUsageEvents = events.filter((event) => event.type === "assistant_usage");
-	const totalCost = assistantUsageEvents.reduce((sum, event) => sum + event.costUsd, 0);
-	if (totalCost <= 0 || assistantUsageEvents.length === 0) return null;
-
-	const first = assistantUsageEvents[0];
-	return analyzeCostAndUpdateBaseline(rootDir, {
-		agentName: "unknown",
-		model: `${first.provider}:${first.model}`,
-		rulesHash: "unknown",
-		costUsd: totalCost,
 	});
 }
 
@@ -256,6 +110,12 @@ function parseArgs(argv: string[]): CircuitBreakerRunOptions {
 				break;
 			case "--agent-dir":
 				options.agentDir = argv[++index];
+				break;
+			case "--agent-name":
+				options.agentName = argv[++index];
+				break;
+			case "--rules-hash":
+				options.rulesHash = argv[++index];
 				break;
 			case "--prompt":
 				options.prompt = argv[++index];
