@@ -73,7 +73,7 @@ Build a GitClaw-native circuit breaker example that captures real SDK events, de
 | T5 | x | Implement intervention writer that saves YAML records under `memory/circuit-breaker/interventions/` | V11,V16,I.detector,I.memory,I.tests |
 | T6 | x | Implement targeted patch planner and dry-run PR body generation | V15,V16,I.patch,I.tests |
 | T7 | x | Implement fixture CLI path for loop, normal, cost, and malformed sessions | V18,I.cli,I.evidence,I.detector,I.patch,I.tests |
-| T8 | . | Implement live SDK capture path from GitClaw query to session JSONL and dry-run intervention | V1,V4,V5,V16,I.sdk,I.cli,I.evidence |
+| T8 | x | Implement live SDK capture path from GitClaw query to session JSONL and dry-run intervention | V1,V4,V5,V16,I.sdk,I.cli,I.evidence |
 | T9 | . | Add `skills/circuit-breaker/SKILL.md` with frontmatter and concise input/output contract | C1,C2,I.skill |
 | T10 | . | Implement cost baseline read/update and cost-warning/anomaly classification | V12,V13,I.detector,I.memory,I.tests |
 | T11 | . | Add README/demo docs with exact commands, artifact map, live-vs-fixture trust boundary, and no production overclaims | V19,C14,I.cli,I.memory |

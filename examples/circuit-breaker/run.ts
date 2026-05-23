@@ -12,6 +12,10 @@ import { planPatchForIntervention } from "./patch-planner.ts";
 
 export interface CircuitBreakerRunOptions {
 	fixture?: string;
+	agentDir?: string;
+	prompt?: string;
+	sessionId?: string;
+	messageSource?: AsyncIterable<GCMessage>;
 	dryRun?: boolean;
 	openPr?: boolean;
 	rootDir?: string;
@@ -36,29 +40,49 @@ export async function runCircuitBreaker(options: CircuitBreakerRunOptions): Prom
 	if (options.openPr) {
 		throw new Error("--open-pr is not implemented until the live PR slice");
 	}
-	if (!options.fixture) {
-		throw new Error("Fixture mode requires --fixture");
+
+	if (options.fixture) {
+		const fixture = await loadFixture(options.fixture);
+		const sessionId = options.sessionId ?? fixture.sessionId ?? sessionIdFromFixturePath(options.fixture);
+		return runNormalizedEvents({
+			...options,
+			sessionId,
+			events: normalizeMessages(fixture.messages),
+		});
 	}
 
-	const fixture = await loadFixture(options.fixture);
-	const sessionId = fixture.sessionId ?? sessionIdFromFixturePath(options.fixture);
-	const events = normalizeFixtureMessages(fixture.messages);
+	const source = options.messageSource ?? await createLiveMessageSource(options);
+	const messages: GCMessage[] = [];
+	for await (const message of source) {
+		messages.push(message);
+	}
+
+	return runNormalizedEvents({
+		...options,
+		sessionId: options.sessionId ?? `live-${new Date().toISOString().replace(/\.\d{3}Z$/, "Z").replace(/:/g, "-")}`,
+		events: normalizeMessages(messages),
+	});
+}
+
+async function runNormalizedEvents(
+	options: CircuitBreakerRunOptions & { sessionId: string; events: CircuitBreakerEvent[] },
+): Promise<CircuitBreakerRunSummary> {
 	const rootDir = options.rootDir ?? process.cwd();
-	const evidence = await writeSessionEvents({ rootDir, sessionId, events });
-	const relativeSessionLog = `memory/circuit-breaker/sessions/${sessionId}.jsonl`;
+	const evidence = await writeSessionEvents({ rootDir, sessionId: options.sessionId, events: options.events });
+	const relativeSessionLog = `memory/circuit-breaker/sessions/${options.sessionId}.jsonl`;
 
 	const finding = detectToolLoop(evidence.events);
 	if (!finding) {
 		return {
-			sessionId,
-			sessionEventLog: getSessionEventLogPath(sessionId, rootDir),
+			sessionId: options.sessionId,
+			sessionEventLog: getSessionEventLogPath(options.sessionId, rootDir),
 			normalizedEventCount: evidence.events.length,
 			findingCount: 0,
 		};
 	}
 
 	const intervention = createToolLoopIntervention({
-		sessionId,
+		sessionId: options.sessionId,
 		sessionEventLog: relativeSessionLog,
 		finding,
 		status: options.dryRun === false ? "opened_pr" : "dry_run",
@@ -71,7 +95,7 @@ export async function runCircuitBreaker(options: CircuitBreakerRunOptions): Prom
 	await writeFile(prBodyPath, patchPlan.prBody, "utf8");
 
 	return {
-		sessionId,
+		sessionId: options.sessionId,
 		sessionEventLog: evidence.path,
 		normalizedEventCount: evidence.events.length,
 		interventionPath: written.path,
@@ -81,13 +105,29 @@ export async function runCircuitBreaker(options: CircuitBreakerRunOptions): Prom
 	};
 }
 
-function normalizeFixtureMessages(messages: unknown[]): CircuitBreakerEvent[] {
+function normalizeMessages(messages: unknown[]): CircuitBreakerEvent[] {
 	const events: CircuitBreakerEvent[] = [];
 	for (const message of messages) {
 		const event = adaptGCMessage(message as GCMessage);
 		if (event) events.push(event);
 	}
 	return events;
+}
+
+async function createLiveMessageSource(options: CircuitBreakerRunOptions): Promise<AsyncIterable<GCMessage>> {
+	if (!options.agentDir) {
+		throw new Error("Live mode requires --agent-dir");
+	}
+	if (!options.prompt) {
+		throw new Error("Live mode requires --prompt");
+	}
+
+	const { query } = await import("../../dist/exports.js");
+	return query({
+		dir: options.agentDir,
+		prompt: options.prompt,
+		sessionId: options.sessionId,
+	});
 }
 
 async function loadFixture(path: string): Promise<{ sessionId?: string; messages: unknown[] }> {
@@ -116,6 +156,15 @@ function parseArgs(argv: string[]): CircuitBreakerRunOptions {
 		switch (arg) {
 			case "--fixture":
 				options.fixture = argv[++index];
+				break;
+			case "--agent-dir":
+				options.agentDir = argv[++index];
+				break;
+			case "--prompt":
+				options.prompt = argv[++index];
+				break;
+			case "--session-id":
+				options.sessionId = argv[++index];
 				break;
 			case "--dry-run":
 				options.dryRun = true;

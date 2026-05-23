@@ -7,6 +7,7 @@ import { join } from "node:path";
 
 import { CircuitBreakerEventSchemaError } from "../examples/circuit-breaker/message-adapter.ts";
 import { runCircuitBreaker } from "../examples/circuit-breaker/run.ts";
+import type { GCMessage } from "../src/sdk-types.ts";
 
 describe("circuit breaker fixture runner", () => {
 	it("writes evidence, intervention, patch, and PR body for the loop fixture", async () => {
@@ -60,8 +61,59 @@ describe("circuit breaker fixture runner", () => {
 				error.message === "tool_use.toolCallId must be a non-empty string",
 		);
 	});
+
+	it("captures an injected live SDK message source through the same dry-run path", async () => {
+		const rootDir = await tempRoot();
+		const summary = await runCircuitBreaker({
+			rootDir,
+			sessionId: "live-test-session",
+			messageSource: liveLoopMessages(),
+			dryRun: true,
+		});
+
+		assert.equal(summary.sessionId, "live-test-session");
+		assert.equal(summary.findingCount, 1);
+		assert.equal(summary.normalizedEventCount, 8);
+		assert.ok(summary.interventionPath);
+		await access(summary.sessionEventLog);
+		await access(summary.interventionPath);
+	});
 });
 
 async function tempRoot(): Promise<string> {
 	return mkdtemp(join(tmpdir(), "gitclaw-cb-run-"));
+}
+
+async function* liveLoopMessages(): AsyncIterable<GCMessage> {
+	for (const message of [
+		toolUse("live-1"),
+		toolResult("live-1"),
+		toolUse("live-2"),
+		toolResult("live-2"),
+		toolUse("live-3"),
+		toolResult("live-3"),
+		toolUse("live-4"),
+		toolResult("live-4"),
+	]) {
+		yield message;
+	}
+}
+
+function toolUse(toolCallId: string): GCMessage {
+	return {
+		type: "tool_use",
+		toolCallId,
+		toolName: "search_docs",
+		args: { query: "gitclaw sdk events" },
+	};
+}
+
+function toolResult(toolCallId: string): GCMessage {
+	return {
+		type: "tool_result",
+		toolCallId,
+		toolName: "search_docs",
+		content: "{\"results\":[{\"url\":\"https://example.com/a\"}]}",
+		isError: false,
+	};
 }
