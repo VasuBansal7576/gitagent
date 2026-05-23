@@ -9,6 +9,7 @@ import { getSessionEventLogPath, writeSessionEvents } from "./evidence-writer.ts
 import { detectToolLoop } from "./detector.ts";
 import { createToolLoopIntervention, writeInterventionRecord } from "./intervention-writer.ts";
 import { planPatchForIntervention } from "./patch-planner.ts";
+import { analyzeCostAndUpdateBaseline, type CostClassification } from "./cost-baseline.ts";
 
 export interface CircuitBreakerRunOptions {
 	fixture?: string;
@@ -29,6 +30,8 @@ export interface CircuitBreakerRunSummary {
 	patchPath?: string;
 	prBodyPath?: string;
 	findingCount: number;
+	costClassification?: CostClassification;
+	costBaselinePath?: string;
 }
 
 interface FixtureFile {
@@ -70,6 +73,7 @@ async function runNormalizedEvents(
 	const rootDir = options.rootDir ?? process.cwd();
 	const evidence = await writeSessionEvents({ rootDir, sessionId: options.sessionId, events: options.events });
 	const relativeSessionLog = `memory/circuit-breaker/sessions/${options.sessionId}.jsonl`;
+	const costAnalysis = await analyzeCostIfPresent(rootDir, options.events);
 
 	const finding = detectToolLoop(evidence.events);
 	if (!finding) {
@@ -78,6 +82,8 @@ async function runNormalizedEvents(
 			sessionEventLog: getSessionEventLogPath(options.sessionId, rootDir),
 			normalizedEventCount: evidence.events.length,
 			findingCount: 0,
+			costClassification: costAnalysis?.classification,
+			costBaselinePath: costAnalysis?.path,
 		};
 	}
 
@@ -102,7 +108,23 @@ async function runNormalizedEvents(
 		patchPath,
 		prBodyPath,
 		findingCount: 1,
+		costClassification: costAnalysis?.classification,
+		costBaselinePath: costAnalysis?.path,
 	};
+}
+
+async function analyzeCostIfPresent(rootDir: string, events: CircuitBreakerEvent[]) {
+	const assistantUsageEvents = events.filter((event) => event.type === "assistant_usage");
+	const totalCost = assistantUsageEvents.reduce((sum, event) => sum + event.costUsd, 0);
+	if (totalCost <= 0 || assistantUsageEvents.length === 0) return null;
+
+	const first = assistantUsageEvents[0];
+	return analyzeCostAndUpdateBaseline(rootDir, {
+		agentName: "unknown",
+		model: `${first.provider}:${first.model}`,
+		rulesHash: "unknown",
+		costUsd: totalCost,
+	});
 }
 
 function normalizeMessages(messages: unknown[]): CircuitBreakerEvent[] {

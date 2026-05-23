@@ -75,7 +75,7 @@ Build a GitClaw-native circuit breaker example that captures real SDK events, de
 | T7 | x | Implement fixture CLI path for loop, normal, cost, and malformed sessions | V18,I.cli,I.evidence,I.detector,I.patch,I.tests |
 | T8 | x | Implement live SDK capture path from GitClaw query to session JSONL and dry-run intervention | V1,V4,V5,V16,I.sdk,I.cli,I.evidence |
 | T9 | x | Add `skills/circuit-breaker/SKILL.md` with frontmatter and concise input/output contract | C1,C2,I.skill |
-| T10 | . | Implement cost baseline read/update and cost-warning/anomaly classification | V12,V13,I.detector,I.memory,I.tests |
+| T10 | x | Implement cost baseline read/update and cost-warning/anomaly classification | V12,V13,I.detector,I.memory,I.tests |
 | T11 | . | Add README/demo docs with exact commands, artifact map, live-vs-fixture trust boundary, and no production overclaims | V19,C14,I.cli,I.memory |
 | T12 | . | Run final validation: `npm run build`, `npm test`, fixture loop, normal fixture, live dry-run, and artifact inspection | V18,V20,I.tests,I.cli,I.memory |
 

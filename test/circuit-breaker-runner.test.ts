@@ -45,6 +45,11 @@ describe("circuit breaker fixture runner", () => {
 			assert.equal(summary.findingCount, 0);
 			assert.equal(summary.interventionPath, undefined);
 			await access(summary.sessionEventLog);
+			if (fixture.includes("cost-spike")) {
+				assert.equal(summary.costClassification?.type, "absolute_budget_warning");
+				assert.ok(summary.costBaselinePath);
+				await access(summary.costBaselinePath);
+			}
 		}
 	});
 
