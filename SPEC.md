@@ -35,6 +35,7 @@ Build a GitClaw-native circuit breaker example that captures real SDK events, de
 | I.detector | `examples/circuit-breaker/detector.ts` | analyzes normalized events and returns findings/interventions with evidence indexes |
 | I.patch | `examples/circuit-breaker/patch-planner.ts` | maps findings to targeted patch plan, dry-run patch text, and PR body |
 | I.github | `examples/circuit-breaker/github-pr-writer.ts` | uses GitHub REST refs, contents, and pulls APIs to create/reuse reviewable PRs |
+| I.calibration | `examples/circuit-breaker/calibration.ts` | regenerates `memory/circuit-breaker/calibration.md` from intervention YAML outcomes |
 | I.cli | `examples/circuit-breaker/run.ts` | supports `--fixture`, `--agent-dir`, `--prompt`, `--dry-run`, `--open-pr` |
 | I.skill | `skills/circuit-breaker/SKILL.md` | GitClaw skill with frontmatter and small input/output contract |
 | I.memory | `memory/circuit-breaker/` | durable `sessions/`, `interventions/`, `baselines/`, `calibration.md` artifacts |
@@ -63,6 +64,7 @@ Build a GitClaw-native circuit breaker example that captures real SDK events, de
 - V19: README distinguishes fixture evidence from live/captured SDK evidence.
 - V20: `npm run build` and `npm test` pass before demo.
 - V21: Live PR mode uses `GITHUB_TOKEN` plus `--github-repo OWNER/REPO`, creates/reuses a branch, patches only the planned target file, opens/reuses a PR, and rewrites the intervention record with the PR URL.
+- V22: Calibration is regenerated from intervention records; pending decisions are not counted as true or false positives, and precision is `N/A` until at least one human decision exists.
 
 ## §T
 
@@ -81,6 +83,7 @@ Build a GitClaw-native circuit breaker example that captures real SDK events, de
 | T11 | x | Add README/demo docs with exact commands, artifact map, live-vs-fixture trust boundary, and no production overclaims | V19,C14,I.cli,I.memory |
 | T12 | x | Run final validation: `npm run build`, `npm test`, fixture loop, normal fixture, live dry-run, and artifact inspection | V18,V20,I.tests,I.cli,I.memory |
 | T13 | x | Implement live GitHub PR mode after local dry-run artifacts exist, with mocked REST-contract tests and README commands | V17,V21,I.github,I.cli,I.tests |
+| T14 | x | Implement honest calibration.md generation from intervention YAML records and wire it into runner outputs | V22,I.calibration,I.memory,I.cli,I.tests |
 
 ## §B
 

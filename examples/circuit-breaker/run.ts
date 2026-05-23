@@ -11,6 +11,7 @@ import { createToolLoopIntervention, writeInterventionRecord } from "./intervent
 import { planPatchForIntervention } from "./patch-planner.ts";
 import { analyzeCostAndUpdateBaseline, type CostClassification } from "./cost-baseline.ts";
 import { openGitHubPrForPatch, type GitHubPrResult } from "./github-pr-writer.ts";
+import { updateCalibration } from "./calibration.ts";
 
 export interface CircuitBreakerRunOptions {
 	fixture?: string;
@@ -39,6 +40,7 @@ export interface CircuitBreakerRunSummary {
 	costClassification?: CostClassification;
 	costBaselinePath?: string;
 	githubPr?: GitHubPrResult;
+	calibrationPath?: string;
 }
 
 interface FixtureFile {
@@ -84,6 +86,7 @@ async function runNormalizedEvents(
 
 	const finding = detectToolLoop(evidence.events);
 	if (!finding) {
+		const calibration = await updateCalibration(rootDir);
 		return {
 			sessionId: options.sessionId,
 			sessionEventLog: getSessionEventLogPath(options.sessionId, rootDir),
@@ -91,6 +94,7 @@ async function runNormalizedEvents(
 			findingCount: 0,
 			costClassification: costAnalysis?.classification,
 			costBaselinePath: costAnalysis?.path,
+			calibrationPath: calibration.path,
 		};
 	}
 
@@ -128,6 +132,7 @@ async function runNormalizedEvents(
 		};
 		await writeInterventionRecord({ rootDir, intervention: openedIntervention });
 	}
+	const calibration = await updateCalibration(rootDir);
 
 	return {
 		sessionId: options.sessionId,
@@ -140,6 +145,7 @@ async function runNormalizedEvents(
 		costClassification: costAnalysis?.classification,
 		costBaselinePath: costAnalysis?.path,
 		githubPr,
+		calibrationPath: calibration.path,
 	};
 }
 

@@ -24,11 +24,13 @@ describe("circuit breaker fixture runner", () => {
 		assert.ok(summary.interventionPath);
 		assert.ok(summary.patchPath);
 		assert.ok(summary.prBodyPath);
+		assert.ok(summary.calibrationPath);
 
 		await access(summary.sessionEventLog);
 		await access(summary.interventionPath);
 		await access(summary.patchPath);
 		await access(summary.prBodyPath);
+		await access(summary.calibrationPath);
 
 		const prBody = await readFile(summary.prBodyPath, "utf8");
 		assert.match(prBody, /Event indexes: `3, 4, 5, 6, 7, 8`/);
@@ -45,6 +47,8 @@ describe("circuit breaker fixture runner", () => {
 			assert.equal(summary.findingCount, 0);
 			assert.equal(summary.interventionPath, undefined);
 			await access(summary.sessionEventLog);
+			assert.ok(summary.calibrationPath);
+			await access(summary.calibrationPath);
 			if (fixture.includes("cost-spike")) {
 				assert.equal(summary.costClassification?.type, "absolute_budget_warning");
 				assert.ok(summary.costBaselinePath);
@@ -80,8 +84,10 @@ describe("circuit breaker fixture runner", () => {
 		assert.equal(summary.findingCount, 1);
 		assert.equal(summary.normalizedEventCount, 8);
 		assert.ok(summary.interventionPath);
+		assert.ok(summary.calibrationPath);
 		await access(summary.sessionEventLog);
 		await access(summary.interventionPath);
+		await access(summary.calibrationPath);
 	});
 
 	it("opens a GitHub PR after local dry-run artifacts are written", async () => {
@@ -101,8 +107,10 @@ describe("circuit breaker fixture runner", () => {
 		assert.ok(summary.interventionPath);
 		assert.ok(summary.patchPath);
 		assert.ok(summary.prBodyPath);
+		assert.ok(summary.calibrationPath);
 		await access(summary.patchPath);
 		await access(summary.prBodyPath);
+		await access(summary.calibrationPath);
 
 		const interventionYaml = await readFile(summary.interventionPath, "utf8");
 		assert.match(interventionYaml, /status: opened_pr/);

@@ -13,6 +13,7 @@ describe("circuit breaker README", () => {
 		assert.match(content, /--agent-dir \.\/agents\/research-agent/);
 		assert.match(content, /--github-repo YOUR_USERNAME\/research-agent/);
 		assert.match(content, /memory\/circuit-breaker\/sessions\/<session-id>\.jsonl/);
+		assert.match(content, /memory\/circuit-breaker\/calibration\.md/);
 		assert.match(content, /V1 is advisory/);
 		assert.doesNotMatch(content, /production-ready/i);
 		assert.doesNotMatch(content, /enterprise-grade/i);

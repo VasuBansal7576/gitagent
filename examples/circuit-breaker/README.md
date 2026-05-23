@@ -14,6 +14,7 @@ breaker normalizes that stream, analyzes it, and writes reviewable artifacts.
 - Interventions are saved as YAML records
 - Dry-run mode writes a patch and PR body locally
 - Cost spikes are warnings until enough baseline samples exist
+- Calibration is regenerated from human-labeled intervention outcomes
 
 ## Fixture Mode
 
@@ -98,6 +99,7 @@ exist does it call GitHub.
 | `memory/circuit-breaker/interventions/<id>.yaml.patch.diff` | proposed patch for review |
 | `memory/circuit-breaker/interventions/<id>.yaml.pr.md` | PR body with exact evidence |
 | `memory/circuit-breaker/baselines/<key>.yaml` | cost baseline samples by agent, model, and rules hash |
+| `memory/circuit-breaker/calibration.md` | pending/merged/rejected intervention accuracy summary |
 
 ## GitHub Contract
 

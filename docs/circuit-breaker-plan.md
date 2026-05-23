@@ -345,6 +345,8 @@ created_at: 2026-05-23T11:20:00Z
 ```
 
 This keeps calibration honest. A record is evidence, not a victory lap.
+`memory/circuit-breaker/calibration.md` is regenerated from intervention YAML
+records, and pending records are not counted as true or false positives.
 
 ## 6. PR Behavior
 
@@ -464,6 +466,7 @@ Before showing this as an assignment/demo:
 - intervention records cite exact session event indexes
 - baseline is read before it is updated
 - cost spike is not presented as statistical unless baseline sample count is sufficient
+- calibration treats unlabeled intervention records as pending, not as wins
 - secrets are never written to git
 - PR patch is targeted to the failure surface and touches only intended files
 - live PR mode creates/reuses a branch and PR only after local artifacts exist
@@ -477,10 +480,11 @@ Five-minute demo:
 2. Run live dry-run around a GitClaw session and show the captured session JSONL.
 3. Show deterministic detection with exact event indexes.
 4. Show the intervention YAML in `memory/circuit-breaker/interventions/`.
-5. Show the generated targeted patch and PR body.
-6. Optionally run `--open-pr` with a test repo and show the reviewable PR.
-7. Run fixture mode briefly to show regression coverage.
-8. Say: "The agent did not need a dashboard. The repo captured the behavior, the detector wrote evidence, and the fix is reviewable like code."
+5. Show `memory/circuit-breaker/calibration.md` and point out pending decisions are not counted as precision.
+6. Show the generated targeted patch and PR body.
+7. Optionally run `--open-pr` with a test repo and show the reviewable PR.
+8. Run fixture mode briefly to show regression coverage.
+9. Say: "The agent did not need a dashboard. The repo captured the behavior, the detector wrote evidence, and the fix is reviewable like code."
 
 ## 11. What Not To Build In V1
 
