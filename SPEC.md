@@ -86,6 +86,7 @@ Build a GitClaw-native circuit breaker example that captures real SDK events, de
 | T13 | x | Implement live GitHub PR mode after local dry-run artifacts exist, with mocked REST-contract tests and README commands | V17,V21,I.github,I.cli,I.tests |
 | T14 | x | Implement honest calibration.md generation from intervention YAML records and wire it into runner outputs | V22,I.calibration,I.memory,I.cli,I.tests |
 | T15 | x | Promote statistical cost anomalies into targeted `agent.yaml` interventions while keeping low-sample warnings advisory | V13,V15,V23,I.patch,I.cli,I.tests |
+| T16 | x | Add a one-command fixture demo script that builds, runs loop/normal/cost evidence paths, and prints generated artifacts | V18,V19,V20,I.cli,I.memory |
 
 ## §B
 

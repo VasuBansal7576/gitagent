@@ -21,6 +21,12 @@ breaker normalizes that stream, analyzes it, and writes reviewable artifacts.
 
 Fixture mode is deterministic regression evidence. It does not call an LLM.
 
+One-command fixture demo:
+
+```bash
+examples/circuit-breaker/demo.sh
+```
+
 ```bash
 npm run build
 node --experimental-strip-types examples/circuit-breaker/run.ts \

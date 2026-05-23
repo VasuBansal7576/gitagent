@@ -9,6 +9,7 @@ describe("circuit breaker README", () => {
 		assert.match(content, /## Fixture Mode/);
 		assert.match(content, /## Live Dry-Run Mode/);
 		assert.match(content, /## Live PR Mode/);
+		assert.match(content, /examples\/circuit-breaker\/demo\.sh/);
 		assert.match(content, /--fixture examples\/circuit-breaker\/fixtures\/search-loop-session\.json/);
 		assert.match(content, /--agent-dir \.\/agents\/research-agent/);
 		assert.match(content, /--github-repo YOUR_USERNAME\/research-agent/);
