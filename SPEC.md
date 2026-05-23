@@ -34,6 +34,7 @@ Build a GitClaw-native circuit breaker example that captures real SDK events, de
 | I.delta | `examples/circuit-breaker/detector.ts` | extracts stable result ids and computes deterministic `result_delta` |
 | I.detector | `examples/circuit-breaker/detector.ts` | analyzes normalized events and returns findings/interventions with evidence indexes |
 | I.patch | `examples/circuit-breaker/patch-planner.ts` | maps findings to targeted patch plan, dry-run patch text, and PR body |
+| I.github | `examples/circuit-breaker/github-pr-writer.ts` | uses GitHub REST refs, contents, and pulls APIs to create/reuse reviewable PRs |
 | I.cli | `examples/circuit-breaker/run.ts` | supports `--fixture`, `--agent-dir`, `--prompt`, `--dry-run`, `--open-pr` |
 | I.skill | `skills/circuit-breaker/SKILL.md` | GitClaw skill with frontmatter and small input/output contract |
 | I.memory | `memory/circuit-breaker/` | durable `sessions/`, `interventions/`, `baselines/`, `calibration.md` artifacts |
@@ -61,6 +62,7 @@ Build a GitClaw-native circuit breaker example that captures real SDK events, de
 - V18: Fixture loop run produces exactly one intervention; normal fixture produces none; malformed fixture fails loudly.
 - V19: README distinguishes fixture evidence from live/captured SDK evidence.
 - V20: `npm run build` and `npm test` pass before demo.
+- V21: Live PR mode uses `GITHUB_TOKEN` plus `--github-repo OWNER/REPO`, creates/reuses a branch, patches only the planned target file, opens/reuses a PR, and rewrites the intervention record with the PR URL.
 
 ## §T
 
@@ -78,6 +80,7 @@ Build a GitClaw-native circuit breaker example that captures real SDK events, de
 | T10 | x | Implement cost baseline read/update and cost-warning/anomaly classification | V12,V13,I.detector,I.memory,I.tests |
 | T11 | x | Add README/demo docs with exact commands, artifact map, live-vs-fixture trust boundary, and no production overclaims | V19,C14,I.cli,I.memory |
 | T12 | x | Run final validation: `npm run build`, `npm test`, fixture loop, normal fixture, live dry-run, and artifact inspection | V18,V20,I.tests,I.cli,I.memory |
+| T13 | x | Implement live GitHub PR mode after local dry-run artifacts exist, with mocked REST-contract tests and README commands | V17,V21,I.github,I.cli,I.tests |
 
 ## §B
 

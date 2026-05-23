@@ -36,17 +36,41 @@ function inferTarget(toolName: string): string {
 }
 
 function buildRulesPatch(intervention: CircuitBreakerIntervention, target: string): string {
-	const toolName = intervention.evidence.tool;
+	const block = renderGuardrailBlock(intervention).trimEnd().split("\n").map((line) => `+${line}`).join("\n");
 	return [
 		`--- a/${target}`,
 		`+++ b/${target}`,
 		"@@",
-		"+## Runaway Tool Guardrails",
-		`+- When ${toolName} repeats with similar arguments, stop after 3 low-progress calls.`,
-		"+- If the last 2 tool results add 0 new stable URLs, files, ids, or SHAs, change strategy or stop.",
-		"+- Record why continuing is expected to produce new information before calling the same tool again.",
+		block,
 		"",
 	].join("\n");
+}
+
+export function renderGuardrailBlock(intervention: CircuitBreakerIntervention): string {
+	const toolName = intervention.evidence.tool;
+	return [
+		"## Runaway Tool Guardrails",
+		`- When ${toolName} repeats with similar arguments, stop after 3 low-progress calls.`,
+		"- If the last 2 tool results add 0 new stable URLs, files, ids, or SHAs, change strategy or stop.",
+		"- Record why continuing is expected to produce new information before calling the same tool again.",
+		"",
+	].join("\n");
+}
+
+export function applyPatchPlanToContent(content: string, intervention: CircuitBreakerIntervention): {
+	changed: boolean;
+	content: string;
+} {
+	const guardrailBlock = renderGuardrailBlock(intervention).trimEnd();
+	if (content.includes(guardrailBlock)) {
+		return { changed: false, content };
+	}
+
+	const separator = content.endsWith("\n") ? "\n" : "\n\n";
+	return {
+		changed: true,
+		content: `${content.trimEnd()}${separator}${guardrailBlock}\n`,
+	};
 }
 
 function buildPrBody(intervention: CircuitBreakerIntervention, rationale: string, patch: string): string {

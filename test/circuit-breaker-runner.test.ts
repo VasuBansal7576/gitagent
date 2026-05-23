@@ -83,6 +83,31 @@ describe("circuit breaker fixture runner", () => {
 		await access(summary.sessionEventLog);
 		await access(summary.interventionPath);
 	});
+
+	it("opens a GitHub PR after local dry-run artifacts are written", async () => {
+		const rootDir = await tempRoot();
+		const summary = await runCircuitBreaker({
+			rootDir,
+			fixture: "examples/circuit-breaker/fixtures/search-loop-session.json",
+			openPr: true,
+			githubRepository: "vasu/research-agent",
+			githubToken: "gh-test-token",
+			branchName: "circuit-breaker/search-loop-session",
+			fetchImpl: githubFetch(),
+		});
+
+		assert.equal(summary.findingCount, 1);
+		assert.equal(summary.githubPr?.url, "https://github.com/vasu/research-agent/pull/42");
+		assert.ok(summary.interventionPath);
+		assert.ok(summary.patchPath);
+		assert.ok(summary.prBodyPath);
+		await access(summary.patchPath);
+		await access(summary.prBodyPath);
+
+		const interventionYaml = await readFile(summary.interventionPath, "utf8");
+		assert.match(interventionYaml, /status: opened_pr/);
+		assert.match(interventionYaml, /pr_url: https:\/\/github\.com\/vasu\/research-agent\/pull\/42/);
+	});
 });
 
 async function tempRoot(): Promise<string> {
@@ -121,4 +146,39 @@ function toolResult(toolCallId: string): GCMessage {
 		content: "{\"results\":[{\"url\":\"https://example.com/a\"}]}",
 		isError: false,
 	};
+}
+
+function githubFetch(): typeof fetch {
+	return async (input, init = {}) => {
+		const url = new URL(String(input));
+		const method = init.method ?? "GET";
+		if (method === "GET" && url.pathname.endsWith("/git/ref/heads/main")) {
+			return json({ object: { sha: "base-sha" } });
+		}
+		if (method === "POST" && url.pathname.endsWith("/git/refs")) {
+			return json({ ref: "refs/heads/circuit-breaker/search-loop-session" }, 201);
+		}
+		if (method === "GET" && url.pathname.endsWith("/contents/RULES.md")) {
+			return json({
+				type: "file",
+				sha: "rules-sha",
+				encoding: "base64",
+				content: Buffer.from("# Rules\n", "utf8").toString("base64"),
+			});
+		}
+		if (method === "PUT" && url.pathname.endsWith("/contents/RULES.md")) {
+			return json({ commit: { sha: "commit-sha" } });
+		}
+		if (method === "POST" && url.pathname.endsWith("/pulls")) {
+			return json({ html_url: "https://github.com/vasu/research-agent/pull/42", number: 42 }, 201);
+		}
+		return json({ message: `unhandled ${method} ${url.pathname}${url.search}` }, 500);
+	};
+}
+
+function json(value: unknown, status = 200): Response {
+	return new Response(JSON.stringify(value), {
+		status,
+		headers: { "content-type": "application/json" },
+	});
 }

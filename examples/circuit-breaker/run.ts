@@ -10,6 +10,7 @@ import { detectToolLoop } from "./detector.ts";
 import { createToolLoopIntervention, writeInterventionRecord } from "./intervention-writer.ts";
 import { planPatchForIntervention } from "./patch-planner.ts";
 import { analyzeCostAndUpdateBaseline, type CostClassification } from "./cost-baseline.ts";
+import { openGitHubPrForPatch, type GitHubPrResult } from "./github-pr-writer.ts";
 
 export interface CircuitBreakerRunOptions {
 	fixture?: string;
@@ -19,6 +20,11 @@ export interface CircuitBreakerRunOptions {
 	messageSource?: AsyncIterable<GCMessage>;
 	dryRun?: boolean;
 	openPr?: boolean;
+	githubRepository?: string;
+	githubToken?: string;
+	baseBranch?: string;
+	branchName?: string;
+	fetchImpl?: typeof fetch;
 	rootDir?: string;
 }
 
@@ -32,6 +38,7 @@ export interface CircuitBreakerRunSummary {
 	findingCount: number;
 	costClassification?: CostClassification;
 	costBaselinePath?: string;
+	githubPr?: GitHubPrResult;
 }
 
 interface FixtureFile {
@@ -40,8 +47,8 @@ interface FixtureFile {
 }
 
 export async function runCircuitBreaker(options: CircuitBreakerRunOptions): Promise<CircuitBreakerRunSummary> {
-	if (options.openPr) {
-		throw new Error("--open-pr is not implemented until the live PR slice");
+	if (options.openPr && options.dryRun) {
+		throw new Error("--open-pr cannot be combined with --dry-run");
 	}
 
 	if (options.fixture) {
@@ -91,7 +98,7 @@ async function runNormalizedEvents(
 		sessionId: options.sessionId,
 		sessionEventLog: relativeSessionLog,
 		finding,
-		status: options.dryRun === false ? "opened_pr" : "dry_run",
+		status: "dry_run",
 	});
 	const written = await writeInterventionRecord({ rootDir, intervention });
 	const patchPlan = planPatchForIntervention(intervention);
@@ -99,6 +106,28 @@ async function runNormalizedEvents(
 	const prBodyPath = `${written.path}.pr.md`;
 	await writeFile(patchPath, patchPlan.patch, "utf8");
 	await writeFile(prBodyPath, patchPlan.prBody, "utf8");
+	let githubPr: GitHubPrResult | undefined;
+
+	if (options.openPr) {
+		githubPr = await openGitHubPrForPatch({
+			token: options.githubToken ?? process.env.GITHUB_TOKEN ?? "",
+			repository: options.githubRepository ?? process.env.TARGET_GITHUB_REPOSITORY ?? process.env.GITHUB_REPOSITORY ?? "",
+			intervention,
+			patchPlan,
+			baseBranch: options.baseBranch,
+			branchName: options.branchName,
+			fetchImpl: options.fetchImpl,
+		});
+		const openedIntervention = {
+			...intervention,
+			action: {
+				...intervention.action,
+				status: "opened_pr" as const,
+				pr_url: githubPr.url,
+			},
+		};
+		await writeInterventionRecord({ rootDir, intervention: openedIntervention });
+	}
 
 	return {
 		sessionId: options.sessionId,
@@ -110,6 +139,7 @@ async function runNormalizedEvents(
 		findingCount: 1,
 		costClassification: costAnalysis?.classification,
 		costBaselinePath: costAnalysis?.path,
+		githubPr,
 	};
 }
 
@@ -193,6 +223,15 @@ function parseArgs(argv: string[]): CircuitBreakerRunOptions {
 				break;
 			case "--open-pr":
 				options.openPr = true;
+				break;
+			case "--github-repo":
+				options.githubRepository = argv[++index];
+				break;
+			case "--base-branch":
+				options.baseBranch = argv[++index];
+				break;
+			case "--branch-name":
+				options.branchName = argv[++index];
 				break;
 			case "--root-dir":
 				options.rootDir = argv[++index];

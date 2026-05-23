@@ -423,20 +423,30 @@ The example can be run in fixture mode or live mode.
 ```bash
 # Fixture mode for repeatable review
 npm run build
-node dist/examples/circuit-breaker/run.js \
+node --experimental-strip-types examples/circuit-breaker/run.ts \
   --fixture examples/circuit-breaker/fixtures/search-loop-session.json \
   --dry-run
 
 # Live mode around a real GitClaw run
-node dist/examples/circuit-breaker/run.js \
+node --experimental-strip-types examples/circuit-breaker/run.ts \
   --agent-dir ./agents/research-agent \
   --prompt "Research the same narrow topic until you have ten unique sources" \
   --dry-run
+
+# Live PR mode after dry-run evidence is correct
+GITHUB_TOKEN=ghp_... node --experimental-strip-types examples/circuit-breaker/run.ts \
+  --agent-dir ./agents/research-agent \
+  --prompt "Research the same narrow topic until you have ten unique sources" \
+  --open-pr \
+  --github-repo YOUR_USERNAME/research-agent \
+  --base-branch main
 ```
 
 `--dry-run` means write the intervention record and PR body locally, but do not open a GitHub PR.
 
-`--open-pr` can be added only after dry-run evidence is correct.
+`--open-pr` can be used only after dry-run evidence is correct. The command first
+writes local evidence, intervention YAML, patch, and PR-body artifacts; then it
+creates or reuses a GitHub branch and PR through the GitHub REST API.
 
 ## 9. Validation Checklist
 
@@ -456,6 +466,7 @@ Before showing this as an assignment/demo:
 - cost spike is not presented as statistical unless baseline sample count is sufficient
 - secrets are never written to git
 - PR patch is targeted to the failure surface and touches only intended files
+- live PR mode creates/reuses a branch and PR only after local artifacts exist
 - README explains fixture evidence versus live evidence
 
 ## 10. Demo Script
@@ -467,8 +478,9 @@ Five-minute demo:
 3. Show deterministic detection with exact event indexes.
 4. Show the intervention YAML in `memory/circuit-breaker/interventions/`.
 5. Show the generated targeted patch and PR body.
-6. Run fixture mode briefly to show regression coverage.
-7. Say: "The agent did not need a dashboard. The repo captured the behavior, the detector wrote evidence, and the fix is reviewable like code."
+6. Optionally run `--open-pr` with a test repo and show the reviewable PR.
+7. Run fixture mode briefly to show regression coverage.
+8. Say: "The agent did not need a dashboard. The repo captured the behavior, the detector wrote evidence, and the fix is reviewable like code."
 
 ## 11. What Not To Build In V1
 
@@ -509,8 +521,8 @@ Build as vertical slices, not layer-by-layer.
    structured-item `result_delta`.
 4. Intervention slice: write one YAML record that cites session event indexes.
 5. Patch slice: generate a targeted patch and PR body in dry-run mode.
-6. Live PR slice: only after dry-run proof is correct, create a branch and open
-   a PR.
+6. Live PR slice: only after dry-run proof is correct, create/reuse a branch,
+   patch only the planned target file, and open/reuse a PR.
 7. Cost-baseline slice: add baseline reading/updating after the loop detector is
    already demonstrable.
 
