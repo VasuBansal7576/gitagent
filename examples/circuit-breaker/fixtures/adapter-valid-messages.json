@@ -1,0 +1,33 @@
+[
+  {
+    "type": "assistant",
+    "content": "I will inspect the repo.",
+    "model": "claude-sonnet-4-20250514",
+    "provider": "anthropic",
+    "stopReason": "toolUse",
+    "usage": {
+      "inputTokens": 120,
+      "outputTokens": 44,
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "totalTokens": 164,
+      "costUsd": 0.00102
+    }
+  },
+  {
+    "type": "tool_use",
+    "toolCallId": "toolu_01",
+    "toolName": "search_docs",
+    "args": {
+      "query": "gitclaw sdk message stream",
+      "limit": 5
+    }
+  },
+  {
+    "type": "tool_result",
+    "toolCallId": "toolu_01",
+    "toolName": "search_docs",
+    "content": "{\"results\":[{\"url\":\"https://example.com/gitclaw-sdk\"}]}",
+    "isError": false
+  }
+]
