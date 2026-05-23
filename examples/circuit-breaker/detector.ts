@@ -1,3 +1,5 @@
+import type { PersistedCircuitBreakerEvent } from "./message-adapter.js";
+
 const STABLE_JSON_KEYS = new Set(["url", "uri", "href", "path", "file", "id", "sha"]);
 const STRIP_QUERY_PARAMS = new Set(["ts", "timestamp", "cache_bust"]);
 
@@ -13,6 +15,39 @@ export interface ResultDeltaResult {
 	windowItems: string[];
 	newItems: string[];
 }
+
+export interface ToolLoopDetectorOptions {
+	toolWindow?: number;
+	argSimilarityThreshold?: number;
+	minResultDelta?: number;
+}
+
+export interface ToolLoopFinding {
+	type: "tool_loop";
+	detector: "tool-loop-v1";
+	severity: "high";
+	toolName: string;
+	windowSize: number;
+	eventIndexes: number[];
+	toolCallIds: string[];
+	argSimilarity: number;
+	resultDelta: number;
+	confidence: number;
+	argsWindow: Array<Record<string, unknown>>;
+	resultItems: string[];
+	newItems: string[];
+}
+
+interface ToolUseResultPair {
+	toolUse: PersistedCircuitBreakerEvent & { event: Extract<PersistedCircuitBreakerEvent["event"], { type: "tool_use" }> };
+	toolResult: PersistedCircuitBreakerEvent & { event: Extract<PersistedCircuitBreakerEvent["event"], { type: "tool_result" }> };
+}
+
+const DEFAULT_TOOL_LOOP_OPTIONS = {
+	toolWindow: 3,
+	argSimilarityThreshold: 0.90,
+	minResultDelta: 0.05,
+};
 
 export function extractStableResultItems(content: string): string[] {
 	const jsonItems = extractJsonItems(content);
@@ -39,6 +74,54 @@ export function computeResultDelta(input: ResultDeltaInput): ResultDeltaResult {
 		windowItems,
 		newItems,
 	};
+}
+
+export function detectToolLoop(
+	events: PersistedCircuitBreakerEvent[],
+	options: ToolLoopDetectorOptions = {},
+): ToolLoopFinding | null {
+	const resolved = { ...DEFAULT_TOOL_LOOP_OPTIONS, ...options };
+	const pairs = pairToolUseResults(events);
+	const matches: ToolLoopFinding[] = [];
+
+	for (let start = 0; start <= pairs.length - resolved.toolWindow; start += 1) {
+		const window = pairs.slice(start, start + resolved.toolWindow);
+		const toolName = window[0]?.toolUse.event.toolName;
+		if (!toolName || !window.every((pair) => pair.toolUse.event.toolName === toolName)) continue;
+
+		const argSimilarity = averageAdjacentSimilarity(window.map((pair) => stableStringify(pair.toolUse.event.args)));
+		if (argSimilarity < resolved.argSimilarityThreshold) continue;
+
+		const previousItems = pairs
+			.slice(0, start)
+			.flatMap((pair) => extractStableResultItems(pair.toolResult.event.content));
+		const delta = computeResultDelta({
+			previousItems,
+			windowContents: window.map((pair) => pair.toolResult.event.content),
+		});
+		if (delta.resultDelta === "unknown" || delta.resultDelta >= resolved.minResultDelta) continue;
+
+		const eventIndexes = window.flatMap((pair) => [pair.toolUse.eventIndex, pair.toolResult.eventIndex]);
+		const confidence = round4(argSimilarity * (1 - delta.resultDelta));
+
+		matches.push({
+			type: "tool_loop",
+			detector: "tool-loop-v1",
+			severity: "high",
+			toolName,
+			windowSize: resolved.toolWindow,
+			eventIndexes,
+			toolCallIds: window.map((pair) => pair.toolUse.event.toolCallId),
+			argSimilarity: round4(argSimilarity),
+			resultDelta: round4(delta.resultDelta),
+			confidence,
+			argsWindow: window.map((pair) => pair.toolUse.event.args),
+			resultItems: delta.windowItems,
+			newItems: delta.newItems,
+		});
+	}
+
+	return matches.sort((a, b) => b.confidence - a.confidence)[0] ?? null;
 }
 
 function extractJsonItems(content: string): string[] {
@@ -129,4 +212,79 @@ function unique(values: string[]): string[] {
 		result.push(value);
 	}
 	return result;
+}
+
+function pairToolUseResults(events: PersistedCircuitBreakerEvent[]): ToolUseResultPair[] {
+	const resultsByCallId = new Map<string, ToolUseResultPair["toolResult"]>();
+	for (const event of events) {
+		if (event.event.type === "tool_result") {
+			resultsByCallId.set(event.event.toolCallId, event as ToolUseResultPair["toolResult"]);
+		}
+	}
+
+	const pairs: ToolUseResultPair[] = [];
+	for (const event of events) {
+		if (event.event.type !== "tool_use") continue;
+		const toolResult = resultsByCallId.get(event.event.toolCallId);
+		if (!toolResult) continue;
+		pairs.push({
+			toolUse: event as ToolUseResultPair["toolUse"],
+			toolResult,
+		});
+	}
+	return pairs.sort((a, b) => a.toolUse.eventIndex - b.toolUse.eventIndex);
+}
+
+function averageAdjacentSimilarity(values: string[]): number {
+	if (values.length < 2) return 1;
+	let total = 0;
+	for (let index = 0; index < values.length - 1; index += 1) {
+		total += stringSimilarity(values[index], values[index + 1]);
+	}
+	return total / (values.length - 1);
+}
+
+function stringSimilarity(a: string, b: string): number {
+	if (a === b) return 1;
+	if (a.length === 0 || b.length === 0) return 0;
+	const distance = levenshteinDistance(a, b);
+	return 1 - distance / Math.max(a.length, b.length);
+}
+
+function levenshteinDistance(a: string, b: string): number {
+	const previous = Array.from({ length: b.length + 1 }, (_value, index) => index);
+	const current = Array.from({ length: b.length + 1 }, () => 0);
+
+	for (let i = 1; i <= a.length; i += 1) {
+		current[0] = i;
+		for (let j = 1; j <= b.length; j += 1) {
+			const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+			current[j] = Math.min(
+				current[j - 1] + 1,
+				previous[j] + 1,
+				previous[j - 1] + cost,
+			);
+		}
+		previous.splice(0, previous.length, ...current);
+	}
+
+	return previous[b.length];
+}
+
+function stableStringify(value: Record<string, unknown>): string {
+	return JSON.stringify(sortObject(value));
+}
+
+function sortObject(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(sortObject);
+	if (typeof value !== "object" || value === null) return value;
+	return Object.fromEntries(
+		Object.entries(value)
+			.sort(([a], [b]) => a.localeCompare(b))
+			.map(([key, child]) => [key, sortObject(child)]),
+	);
+}
+
+function round4(value: number): number {
+	return Math.round(value * 10000) / 10000;
 }
