@@ -24,6 +24,18 @@ describe("circuit breaker patch planner", () => {
 			/No patch planner for detector: unknown-detector/,
 		);
 	});
+
+	it("targets agent.yaml for pure cost anomalies", () => {
+		const plan = planPatchForIntervention(costIntervention());
+
+		assert.equal(plan.target, "agent.yaml");
+		assert.match(plan.rationale, /\$2\.5000 was 5x the p95 baseline/);
+		assert.match(plan.patch, /--- a\/agent\.yaml/);
+		assert.match(plan.patch, /budget_guardrails:/);
+		assert.match(plan.prTitle, /budget guardrail/);
+		assert.match(plan.prBody, /Actual cost: `\$2\.5000`/);
+		assert.match(plan.prBody, /Baseline samples: `5`/);
+	});
 });
 
 function intervention(): CircuitBreakerIntervention {
@@ -50,6 +62,34 @@ function intervention(): CircuitBreakerIntervention {
 			status: "dry_run",
 			pr_url: null,
 			patch_target: "RULES.md",
+		},
+		human_decision: null,
+		created_at: "2026-05-23T12:30:00.000Z",
+	};
+}
+
+function costIntervention(): CircuitBreakerIntervention {
+	return {
+		id: "2026-05-23T12-30-00Z-cost-spike-v1",
+		session_id: "session-cost",
+		agent: "research-agent",
+		model: "anthropic:claude-sonnet-4",
+		rules_hash: "abc12345",
+		detector: "cost-spike-v1",
+		severity: "medium",
+		evidence: {
+			session_event_log: "memory/circuit-breaker/sessions/session-cost.jsonl",
+			event_indexes: [],
+			actual_cost_usd: 2.5,
+			p95_baseline_usd: 0.5,
+			anomaly_ratio: 5,
+			baseline_samples: 5,
+		},
+		action: {
+			type: "pull_request",
+			status: "dry_run",
+			pr_url: null,
+			patch_target: "agent.yaml",
 		},
 		human_decision: null,
 		created_at: "2026-05-23T12:30:00.000Z",

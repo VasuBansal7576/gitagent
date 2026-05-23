@@ -8,6 +8,7 @@ import YAML from "yaml";
 
 import type { ToolLoopFinding } from "../examples/circuit-breaker/detector.ts";
 import {
+	createCostAnomalyIntervention,
 	createToolLoopIntervention,
 	writeInterventionRecord,
 } from "../examples/circuit-breaker/intervention-writer.ts";
@@ -52,6 +53,30 @@ describe("circuit breaker intervention writer", () => {
 
 		const parsed = YAML.parse(await readFile(result.path, "utf8"));
 		assert.deepEqual(parsed, intervention);
+	});
+
+	it("creates a cost anomaly intervention record with baseline evidence", () => {
+		const intervention = createCostAnomalyIntervention({
+			sessionId: "session-cost",
+			sessionEventLog: "memory/circuit-breaker/sessions/session-cost.jsonl",
+			classification: {
+				type: "cost_anomaly",
+				actual_cost: 2.5,
+				p95_baseline: 0.5,
+				anomaly_ratio: 5,
+				baseline_samples: 5,
+			},
+			createdAt: "2026-05-23T12:31:00.000Z",
+		});
+
+		assert.equal(intervention.id, "2026-05-23T12-31-00Z-cost-spike-v1");
+		assert.equal(intervention.detector, "cost-spike-v1");
+		assert.equal(intervention.severity, "medium");
+		assert.equal(intervention.action.patch_target, "agent.yaml");
+		assert.equal(intervention.evidence.actual_cost_usd, 2.5);
+		assert.equal(intervention.evidence.p95_baseline_usd, 0.5);
+		assert.equal(intervention.evidence.anomaly_ratio, 5);
+		assert.equal(intervention.evidence.baseline_samples, 5);
 	});
 });
 

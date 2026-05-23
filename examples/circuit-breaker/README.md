@@ -14,6 +14,7 @@ breaker normalizes that stream, analyzes it, and writes reviewable artifacts.
 - Interventions are saved as YAML records
 - Dry-run mode writes a patch and PR body locally
 - Cost spikes are warnings until enough baseline samples exist
+- Statistical cost anomalies propose a targeted `agent.yaml` budget guardrail
 - Calibration is regenerated from human-labeled intervention outcomes
 
 ## Fixture Mode

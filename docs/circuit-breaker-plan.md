@@ -308,6 +308,9 @@ If there are fewer than five baseline samples, do not call it a statistical anom
 Cost spike is supporting evidence in the five-minute demo, not the main proof.
 The main proof should be the deterministic tool-loop detector because it works
 with one captured run. Cost baselines become stronger after repeated real runs.
+Once a cost spike has at least five baseline samples, it can produce a targeted
+`agent.yaml` budget-guardrail PR. Low-sample absolute budget warnings remain
+evidence only.
 
 ### P2: No Progress
 

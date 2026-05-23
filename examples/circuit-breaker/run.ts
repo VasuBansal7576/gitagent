@@ -7,7 +7,12 @@ import type { GCMessage } from "../../src/sdk-types.js";
 import { adaptGCMessage, type CircuitBreakerEvent } from "./message-adapter.ts";
 import { getSessionEventLogPath, writeSessionEvents } from "./evidence-writer.ts";
 import { detectToolLoop } from "./detector.ts";
-import { createToolLoopIntervention, writeInterventionRecord } from "./intervention-writer.ts";
+import {
+	createCostAnomalyIntervention,
+	createToolLoopIntervention,
+	type CircuitBreakerIntervention,
+	writeInterventionRecord,
+} from "./intervention-writer.ts";
 import { planPatchForIntervention } from "./patch-planner.ts";
 import { analyzeCostAndUpdateBaseline, type CostClassification } from "./cost-baseline.ts";
 import { openGitHubPrForPatch, type GitHubPrResult } from "./github-pr-writer.ts";
@@ -86,6 +91,24 @@ async function runNormalizedEvents(
 
 	const finding = detectToolLoop(evidence.events);
 	if (!finding) {
+		if (costAnalysis?.classification.type === "cost_anomaly") {
+			const intervention = createCostAnomalyIntervention({
+				sessionId: options.sessionId,
+				sessionEventLog: relativeSessionLog,
+				classification: costAnalysis.classification,
+			});
+			const written = await writeInterventionArtifacts({ options, rootDir, intervention });
+			return {
+				sessionId: options.sessionId,
+				sessionEventLog: evidence.path,
+				normalizedEventCount: evidence.events.length,
+				...written,
+				findingCount: 1,
+				costClassification: costAnalysis.classification,
+				costBaselinePath: costAnalysis.path,
+			};
+		}
+
 		const calibration = await updateCalibration(rootDir);
 		return {
 			sessionId: options.sessionId,
@@ -104,6 +127,28 @@ async function runNormalizedEvents(
 		finding,
 		status: "dry_run",
 	});
+	const written = await writeInterventionArtifacts({ options, rootDir, intervention });
+
+	return {
+		sessionId: options.sessionId,
+		sessionEventLog: evidence.path,
+		normalizedEventCount: evidence.events.length,
+		...written,
+		findingCount: 1,
+		costClassification: costAnalysis?.classification,
+		costBaselinePath: costAnalysis?.path,
+	};
+}
+
+async function writeInterventionArtifacts(input: {
+	options: CircuitBreakerRunOptions;
+	rootDir: string;
+	intervention: CircuitBreakerIntervention;
+}): Promise<Pick<
+	CircuitBreakerRunSummary,
+	"interventionPath" | "patchPath" | "prBodyPath" | "githubPr" | "calibrationPath"
+>> {
+	const { options, rootDir, intervention } = input;
 	const written = await writeInterventionRecord({ rootDir, intervention });
 	const patchPlan = planPatchForIntervention(intervention);
 	const patchPath = `${written.path}.patch.diff`;
@@ -135,15 +180,9 @@ async function runNormalizedEvents(
 	const calibration = await updateCalibration(rootDir);
 
 	return {
-		sessionId: options.sessionId,
-		sessionEventLog: evidence.path,
-		normalizedEventCount: evidence.events.length,
 		interventionPath: written.path,
 		patchPath,
 		prBodyPath,
-		findingCount: 1,
-		costClassification: costAnalysis?.classification,
-		costBaselinePath: costAnalysis?.path,
 		githubPr,
 		calibrationPath: calibration.path,
 	};

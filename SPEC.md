@@ -65,6 +65,7 @@ Build a GitClaw-native circuit breaker example that captures real SDK events, de
 - V20: `npm run build` and `npm test` pass before demo.
 - V21: Live PR mode uses `GITHUB_TOKEN` plus `--github-repo OWNER/REPO`, creates/reuses a branch, patches only the planned target file, opens/reuses a PR, and rewrites the intervention record with the PR URL.
 - V22: Calibration is regenerated from intervention records; pending decisions are not counted as true or false positives, and precision is `N/A` until at least one human decision exists.
+- V23: Cost anomaly interventions are PR-capable only when the classification is statistical (`sample_count >= 5`); absolute budget warnings remain non-PR evidence.
 
 ## §T
 
@@ -84,6 +85,7 @@ Build a GitClaw-native circuit breaker example that captures real SDK events, de
 | T12 | x | Run final validation: `npm run build`, `npm test`, fixture loop, normal fixture, live dry-run, and artifact inspection | V18,V20,I.tests,I.cli,I.memory |
 | T13 | x | Implement live GitHub PR mode after local dry-run artifacts exist, with mocked REST-contract tests and README commands | V17,V21,I.github,I.cli,I.tests |
 | T14 | x | Implement honest calibration.md generation from intervention YAML records and wire it into runner outputs | V22,I.calibration,I.memory,I.cli,I.tests |
+| T15 | x | Promote statistical cost anomalies into targeted `agent.yaml` interventions while keeping low-sample warnings advisory | V13,V15,V23,I.patch,I.cli,I.tests |
 
 ## §B
 

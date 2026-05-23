@@ -9,14 +9,14 @@ export interface PatchPlan {
 }
 
 export function planPatchForIntervention(intervention: CircuitBreakerIntervention): PatchPlan {
-	if (intervention.detector !== "tool-loop-v1") {
+	if (!["tool-loop-v1", "cost-spike-v1"].includes(intervention.detector)) {
 		throw new Error(`No patch planner for detector: ${intervention.detector}`);
 	}
 
-	const target = intervention.action.patch_target || inferTarget(intervention.evidence.tool);
-	const rationale = `Repeated ${intervention.evidence.tool} calls returned low new-result delta (${intervention.evidence.result_delta}).`;
-	const patch = buildRulesPatch(intervention, target);
-	const prTitle = `circuit-breaker: add guardrail for ${intervention.evidence.tool} loop`;
+	const target = intervention.action.patch_target || inferTarget(intervention);
+	const rationale = buildRationale(intervention);
+	const patch = buildPatch(intervention, target);
+	const prTitle = buildPrTitle(intervention);
 	const prBody = buildPrBody(intervention, rationale, patch);
 
 	return {
@@ -28,15 +28,17 @@ export function planPatchForIntervention(intervention: CircuitBreakerInterventio
 	};
 }
 
-function inferTarget(toolName: string): string {
+function inferTarget(intervention: CircuitBreakerIntervention): string {
+	if (intervention.detector === "cost-spike-v1") return "agent.yaml";
+	const toolName = intervention.evidence.tool ?? "";
 	const lowered = toolName.toLowerCase();
 	if (/(search|read|list|grep|glob)/.test(lowered)) return "RULES.md";
 	if (/(shell|bash|exec|cli)/.test(lowered)) return "RULES.md";
 	return "RULES.md";
 }
 
-function buildRulesPatch(intervention: CircuitBreakerIntervention, target: string): string {
-	const block = renderGuardrailBlock(intervention).trimEnd().split("\n").map((line) => `+${line}`).join("\n");
+function buildPatch(intervention: CircuitBreakerIntervention, target: string): string {
+	const block = renderPatchBlock(intervention).trimEnd().split("\n").map((line) => `+${line}`).join("\n");
 	return [
 		`--- a/${target}`,
 		`+++ b/${target}`,
@@ -46,8 +48,19 @@ function buildRulesPatch(intervention: CircuitBreakerIntervention, target: strin
 	].join("\n");
 }
 
+export function renderPatchBlock(intervention: CircuitBreakerIntervention): string {
+	if (intervention.detector === "cost-spike-v1") {
+		return renderBudgetGuardrailBlock(intervention);
+	}
+	return renderToolGuardrailBlock(intervention);
+}
+
 export function renderGuardrailBlock(intervention: CircuitBreakerIntervention): string {
-	const toolName = intervention.evidence.tool;
+	return renderPatchBlock(intervention);
+}
+
+function renderToolGuardrailBlock(intervention: CircuitBreakerIntervention): string {
+	const toolName = intervention.evidence.tool ?? "the same tool";
 	return [
 		"## Runaway Tool Guardrails",
 		`- When ${toolName} repeats with similar arguments, stop after 3 low-progress calls.`,
@@ -57,11 +70,23 @@ export function renderGuardrailBlock(intervention: CircuitBreakerIntervention): 
 	].join("\n");
 }
 
+function renderBudgetGuardrailBlock(intervention: CircuitBreakerIntervention): string {
+	const p95 = intervention.evidence.p95_baseline_usd ?? 0;
+	const maxCost = Math.max(0.01, Math.ceil(p95 * 300) / 100);
+	return [
+		"budget_guardrails:",
+		`  max_cost_usd_per_run: ${maxCost.toFixed(2)}`,
+		"  on_exceeded: stop_and_request_review",
+		"  source: circuit-breaker cost-spike-v1",
+		"",
+	].join("\n");
+}
+
 export function applyPatchPlanToContent(content: string, intervention: CircuitBreakerIntervention): {
 	changed: boolean;
 	content: string;
 } {
-	const guardrailBlock = renderGuardrailBlock(intervention).trimEnd();
+	const guardrailBlock = renderPatchBlock(intervention).trimEnd();
 	if (content.includes(guardrailBlock)) {
 		return { changed: false, content };
 	}
@@ -74,17 +99,14 @@ export function applyPatchPlanToContent(content: string, intervention: CircuitBr
 }
 
 function buildPrBody(intervention: CircuitBreakerIntervention, rationale: string, patch: string): string {
+	const evidenceLines = buildEvidenceLines(intervention);
 	return [
 		`## Circuit Breaker Fired: ${intervention.detector}`,
 		"",
 		"### What Fired",
 		`- Session: \`${intervention.session_id}\``,
-		`- Tool: \`${intervention.evidence.tool}\``,
 		`- Evidence log: \`${intervention.evidence.session_event_log}\``,
-		`- Event indexes: \`${intervention.evidence.event_indexes.join(", ")}\``,
-		`- Argument similarity: \`${intervention.evidence.arg_similarity}\``,
-		`- Result delta: \`${intervention.evidence.result_delta}\``,
-		`- Confidence: \`${intervention.evidence.confidence}\``,
+		...evidenceLines,
 		"",
 		"### Why This Is Risky",
 		rationale,
@@ -102,4 +124,36 @@ function buildPrBody(intervention: CircuitBreakerIntervention, rationale: string
 		"",
 		`Mode: \`${intervention.action.status}\``,
 	].join("\n");
+}
+
+function buildRationale(intervention: CircuitBreakerIntervention): string {
+	if (intervention.detector === "cost-spike-v1") {
+		return `Run cost $${intervention.evidence.actual_cost_usd?.toFixed(4)} was ${intervention.evidence.anomaly_ratio}x the p95 baseline after ${intervention.evidence.baseline_samples} samples.`;
+	}
+	return `Repeated ${intervention.evidence.tool} calls returned low new-result delta (${intervention.evidence.result_delta}).`;
+}
+
+function buildPrTitle(intervention: CircuitBreakerIntervention): string {
+	if (intervention.detector === "cost-spike-v1") {
+		return "circuit-breaker: add budget guardrail for cost spike";
+	}
+	return `circuit-breaker: add guardrail for ${intervention.evidence.tool} loop`;
+}
+
+function buildEvidenceLines(intervention: CircuitBreakerIntervention): string[] {
+	if (intervention.detector === "cost-spike-v1") {
+		return [
+			`- Actual cost: \`$${intervention.evidence.actual_cost_usd?.toFixed(4)}\``,
+			`- p95 baseline: \`$${intervention.evidence.p95_baseline_usd?.toFixed(4)}\``,
+			`- Anomaly ratio: \`${intervention.evidence.anomaly_ratio}x\``,
+			`- Baseline samples: \`${intervention.evidence.baseline_samples}\``,
+		];
+	}
+	return [
+		`- Tool: \`${intervention.evidence.tool}\``,
+		`- Event indexes: \`${intervention.evidence.event_indexes.join(", ")}\``,
+		`- Argument similarity: \`${intervention.evidence.arg_similarity}\``,
+		`- Result delta: \`${intervention.evidence.result_delta}\``,
+		`- Confidence: \`${intervention.evidence.confidence}\``,
+	];
 }

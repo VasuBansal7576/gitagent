@@ -3,11 +3,25 @@ import { join } from "node:path";
 import YAML from "yaml";
 
 import type { ToolLoopFinding } from "./detector.js";
+import type { CostClassification } from "./cost-baseline.ts";
 
 export interface ToolLoopInterventionInput {
 	sessionId: string;
 	sessionEventLog: string;
 	finding: ToolLoopFinding;
+	agent?: string;
+	model?: string;
+	rulesHash?: string;
+	createdAt?: Date | string;
+	status?: "dry_run" | "opened_pr";
+	prUrl?: string | null;
+	patchTarget?: string;
+}
+
+export interface CostAnomalyInterventionInput {
+	sessionId: string;
+	sessionEventLog: string;
+	classification: Extract<CostClassification, { type: "cost_anomaly" }>;
 	agent?: string;
 	model?: string;
 	rulesHash?: string;
@@ -28,12 +42,16 @@ export interface CircuitBreakerIntervention {
 	evidence: {
 		session_event_log: string;
 		event_indexes: number[];
-		tool: string;
-		window_size: number;
-		arg_similarity: number;
-		result_delta: number;
-		confidence: number;
-		tool_call_ids: string[];
+		tool?: string;
+		window_size?: number;
+		arg_similarity?: number;
+		result_delta?: number;
+		confidence?: number;
+		tool_call_ids?: string[];
+		actual_cost_usd?: number;
+		p95_baseline_usd?: number;
+		anomaly_ratio?: number;
+		baseline_samples?: number;
 	};
 	action: {
 		type: "pull_request";
@@ -80,6 +98,35 @@ export function createToolLoopIntervention(input: ToolLoopInterventionInput): Ci
 			status: input.status ?? "dry_run",
 			pr_url: input.prUrl ?? null,
 			patch_target: input.patchTarget ?? "RULES.md",
+		},
+		human_decision: null,
+		created_at: createdAt.toISOString(),
+	};
+}
+
+export function createCostAnomalyIntervention(input: CostAnomalyInterventionInput): CircuitBreakerIntervention {
+	const createdAt = normalizeCreatedAt(input.createdAt);
+	return {
+		id: `${formatInterventionTimestamp(createdAt)}-cost-spike-v1`,
+		session_id: input.sessionId,
+		agent: input.agent ?? "unknown",
+		model: input.model ?? "unknown",
+		rules_hash: input.rulesHash ?? "unknown",
+		detector: "cost-spike-v1",
+		severity: "medium",
+		evidence: {
+			session_event_log: input.sessionEventLog,
+			event_indexes: [],
+			actual_cost_usd: input.classification.actual_cost,
+			p95_baseline_usd: input.classification.p95_baseline,
+			anomaly_ratio: input.classification.anomaly_ratio,
+			baseline_samples: input.classification.baseline_samples,
+		},
+		action: {
+			type: "pull_request",
+			status: input.status ?? "dry_run",
+			pr_url: input.prUrl ?? null,
+			patch_target: input.patchTarget ?? "agent.yaml",
 		},
 		human_decision: null,
 		created_at: createdAt.toISOString(),

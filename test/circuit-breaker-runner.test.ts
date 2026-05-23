@@ -7,6 +7,7 @@ import { join } from "node:path";
 
 import { CircuitBreakerEventSchemaError } from "../examples/circuit-breaker/message-adapter.ts";
 import { runCircuitBreaker } from "../examples/circuit-breaker/run.ts";
+import { analyzeCostAndUpdateBaseline } from "../examples/circuit-breaker/cost-baseline.ts";
 import type { GCMessage } from "../src/sdk-types.ts";
 
 describe("circuit breaker fixture runner", () => {
@@ -69,6 +70,38 @@ describe("circuit breaker fixture runner", () => {
 				error instanceof CircuitBreakerEventSchemaError &&
 				error.message === "tool_use.toolCallId must be a non-empty string",
 		);
+	});
+
+	it("writes a cost anomaly intervention only after enough baseline samples exist", async () => {
+		const rootDir = await tempRoot();
+		for (let index = 0; index < 5; index += 1) {
+			await analyzeCostAndUpdateBaseline(rootDir, {
+				agentName: "unknown",
+				model: "anthropic:claude-sonnet-4-20250514",
+				rulesHash: "unknown",
+				costUsd: 0.2,
+				observedAt: `2026-05-23T12:00:0${index}.000Z`,
+			});
+		}
+
+		const summary = await runCircuitBreaker({
+			rootDir,
+			fixture: "examples/circuit-breaker/fixtures/cost-spike-session.json",
+			dryRun: true,
+		});
+
+		assert.equal(summary.findingCount, 1);
+		assert.equal(summary.costClassification?.type, "cost_anomaly");
+		assert.ok(summary.interventionPath);
+		assert.ok(summary.patchPath);
+		assert.ok(summary.prBodyPath);
+
+		const patch = await readFile(summary.patchPath, "utf8");
+		const prBody = await readFile(summary.prBodyPath, "utf8");
+		assert.match(patch, /--- a\/agent\.yaml/);
+		assert.match(patch, /budget_guardrails:/);
+		assert.match(prBody, /cost-spike-v1/);
+		assert.match(prBody, /Actual cost: `\$2\.5000`/);
 	});
 
 	it("captures an injected live SDK message source through the same dry-run path", async () => {
