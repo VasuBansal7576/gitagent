@@ -85,6 +85,8 @@ describe("circuit breaker fixture runner", () => {
 				rulesHash: "unknown",
 				costUsd: 0.2,
 				observedAt: `2026-05-23T12:00:0${index}.000Z`,
+			}, {
+				updateBaseline: true,
 			});
 		}
 

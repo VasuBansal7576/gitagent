@@ -1,12 +1,13 @@
 import { readFile, writeFile, mkdir, readdir, rm } from "fs/promises";
 import { join } from "path";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { type Static } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { skillLearnerSchema } from "./shared.js";
 import { loadSkillStats, isSkillFlagged } from "../learning/reinforcement.js";
 import type { TaskRecord } from "./task-tracker.js";
 import yaml from "js-yaml";
+import { isRestrictedPath } from "../hooks.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -86,9 +87,9 @@ async function getExistingSkillDescriptions(agentDir: string): Promise<Array<{ n
 function gitCommit(agentDir: string, files: string[], message: string): void {
 	try {
 		for (const f of files) {
-			execSync(`git add "${f}"`, { cwd: agentDir, stdio: "pipe" });
+			execFileSync("git", ["add", f], { cwd: agentDir, stdio: "pipe" });
 		}
-		execSync(`git commit -m "${message.replace(/"/g, '\\"')}"`, {
+		execFileSync("git", ["commit", "-m", message], {
 			cwd: agentDir,
 			stdio: "pipe",
 		});
@@ -240,8 +241,11 @@ export function createSkillLearnerTool(agentDir: string, gitagentDir: string): A
 
 					// Write skill
 					const skillDir = join(agentDir, "skills", params.skill_name);
-					await mkdir(skillDir, { recursive: true });
 					const skillFile = join(skillDir, "SKILL.md");
+					if (isRestrictedPath(skillFile, agentDir)) {
+						throw new Error(`Security exception: Modifying safety-critical file or path "${skillFile}" is strictly blocked.`);
+					}
+					await mkdir(skillDir, { recursive: true });
 					await writeFile(skillFile, content, "utf-8");
 
 					// Git commit
@@ -352,6 +356,9 @@ export function createSkillLearnerTool(agentDir: string, gitagentDir: string): A
 					if (!params.instructions) throw new Error("instructions is required for update action");
 
 					const skillFile = join(agentDir, "skills", params.skill_name, "SKILL.md");
+					if (isRestrictedPath(skillFile, agentDir)) {
+						throw new Error(`Security exception: Modifying safety-critical file or path "${skillFile}" is strictly blocked.`);
+					}
 					let content: string;
 					try {
 						content = await readFile(skillFile, "utf-8");
@@ -379,6 +386,9 @@ export function createSkillLearnerTool(agentDir: string, gitagentDir: string): A
 					if (!params.skill_name) throw new Error("skill_name is required for delete action");
 
 					const skillDir = join(agentDir, "skills", params.skill_name);
+					if (isRestrictedPath(skillDir, agentDir)) {
+						throw new Error(`Security exception: Modifying safety-critical file or path "${skillDir}" is strictly blocked.`);
+					}
 					try {
 						await rm(skillDir, { recursive: true });
 					} catch {
@@ -386,7 +396,8 @@ export function createSkillLearnerTool(agentDir: string, gitagentDir: string): A
 					}
 
 					try {
-						execSync(`git add -A && git commit -m "Delete skill: ${params.skill_name.replace(/"/g, '\\"')}"`, {
+						execFileSync("git", ["add", "-A"], { cwd: agentDir, stdio: "pipe" });
+						execFileSync("git", ["commit", "-m", `Delete skill: ${params.skill_name}`], {
 							cwd: agentDir,
 							stdio: "pipe",
 						});

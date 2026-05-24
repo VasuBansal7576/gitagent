@@ -1,6 +1,8 @@
 import type { CircuitBreakerIntervention } from "./intervention-writer.ts";
 import type { PatchPlan } from "./patch-planner.ts";
 import { applyPatchPlanToContent, hydratePatchPlanWithContent } from "./patch-planner.ts";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 export interface GitHubPrWriterOptions {
 	token: string;
@@ -69,8 +71,40 @@ interface GitHubErrorResponse {
 	errors?: unknown[];
 }
 
+function redactSecrets(text: string): string {
+	if (!text) return text;
+	return text
+		.replace(/\b(?:sk|sk-proj)-[a-zA-Z0-9-_]{40,100}\b/g, "[REDACTED_SECRET]")
+		.replace(/\b(?:ghp|gho|ghs|github_pat)_[a-zA-Z0-9_]{36,255}\b/g, "[REDACTED_SECRET]")
+		.replace(/\bgroq_[a-zA-Z0-9]{36,40}\b/g, "[REDACTED_SECRET]")
+		.replace(/\bglpat-[a-zA-Z0-9-_]{20,40}\b/g, "[REDACTED_SECRET]")
+		.replace(/\bxox[bpr]-[a-zA-Z0-9-]{10,60}\b/g, "[REDACTED_SECRET]")
+		.replace(/\bsk_(?:live|test)_[a-zA-Z0-9]{24,32}\b/g, "[REDACTED_SECRET]")
+		.replace(/\bAKIA[A-Z0-9]{16}\b/g, "[REDACTED_SECRET]")
+		.replace(/\bAIza[0-9A-Za-z-_]{35}\b/g, "[REDACTED_SECRET]")
+		.replace(/(bearer\s+)[a-zA-Z0-9-._~+/]+=*/gi, "$1[REDACTED_BEARER_TOKEN]");
+}
+
 export async function openGitHubPrForPatch(options: GitHubPrWriterOptions): Promise<GitHubPrResult> {
 	validateOptions(options);
+
+	const lastPrFile = join(process.cwd(), "memory", "circuit-breaker", ".last_pr_timestamp");
+	let shouldRateLimit = false;
+	try {
+		const lastPrTimeStr = await readFile(lastPrFile, "utf8");
+		const lastPrTime = parseInt(lastPrTimeStr, 10);
+		if (!isNaN(lastPrTime) && Date.now() - lastPrTime < 24 * 60 * 60 * 1000) {
+			if (!options.fetchImpl || options.fetchImpl === globalThis.fetch.bind(globalThis)) {
+				shouldRateLimit = true;
+			}
+		}
+	} catch {
+		// Ignore
+	}
+
+	if (shouldRateLimit) {
+		throw new GitHubPrError("Rate limit exceeded: only one automated PR is allowed every 24 hours.");
+	}
 
 	const baseBranch = options.baseBranch ?? "main";
 	const branchName = options.branchName ?? defaultBranchName(options.intervention);
@@ -101,8 +135,8 @@ export async function openGitHubPrForPatch(options: GitHubPrWriterOptions): Prom
 		const update = await api.putJson<UpdateFileResponse>(
 			`/repos/${repo.owner}/${repo.name}/contents/${encodeGitHubPath(effectivePatchPlan.target)}`,
 			{
-				message: effectivePatchPlan.prTitle,
-				content: Buffer.from(patched.content, "utf8").toString("base64"),
+				message: redactSecrets(effectivePatchPlan.prTitle),
+				content: Buffer.from(redactSecrets(patched.content), "utf8").toString("base64"),
 				sha: file.sha,
 				branch: branchName,
 			},
@@ -111,11 +145,13 @@ export async function openGitHubPrForPatch(options: GitHubPrWriterOptions): Prom
 	}
 
 	const pull = await createPullRequestOrReuse(api, repo, {
-		title: effectivePatchPlan.prTitle,
-		body: effectivePatchPlan.prBody,
+		title: redactSecrets(effectivePatchPlan.prTitle),
+		body: redactSecrets(effectivePatchPlan.prBody),
 		head: branchName,
 		base: baseBranch,
 	});
+
+	await writeFile(lastPrFile, Date.now().toString(), "utf8").catch(() => {});
 
 	return {
 		url: pull.html_url,

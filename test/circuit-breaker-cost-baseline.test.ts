@@ -15,10 +15,10 @@ describe("circuit breaker cost baseline", () => {
 		const rootDir = await tempRoot();
 
 		for (let index = 0; index < 5; index += 1) {
-			await analyzeCostAndUpdateBaseline(rootDir, sample(1, `2026-05-23T12:00:0${index}.000Z`));
+			await analyzeCostAndUpdateBaseline(rootDir, sample(1, `2026-05-23T12:00:0${index}.000Z`), { updateBaseline: true });
 		}
 
-		const result = await analyzeCostAndUpdateBaseline(rootDir, sample(4, "2026-05-23T12:01:00.000Z"));
+		const result = await analyzeCostAndUpdateBaseline(rootDir, sample(4, "2026-05-23T12:01:00.000Z"), { updateBaseline: true });
 
 		assert.equal(result.previousBaseline?.sample_count, 5);
 		assert.equal(result.previousBaseline?.p95_cost_per_run, 1);

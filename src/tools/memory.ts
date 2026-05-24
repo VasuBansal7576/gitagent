@@ -1,11 +1,12 @@
 import { readFile, writeFile, mkdir } from "fs/promises";
 import { join, dirname } from "path";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { type Static } from "@sinclair/typebox";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { memorySchema, DEFAULT_MEMORY_PATH } from "./shared.js";
 import yaml from "js-yaml";
 import type { MemoryLayerDef } from "../plugin-types.js";
+import { isRestrictedPath } from "../hooks.js";
 
 interface MemoryLayer {
 	name: string;
@@ -73,6 +74,10 @@ async function archiveOverflow(
 	const archiveFile = `memory/archive/${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}.md`;
 	const archivePath = join(cwd, archiveFile);
 
+	if (isRestrictedPath(archiveFile, cwd)) {
+		throw new Error(`Security exception: Modifying safety-critical file or path "${archiveFile}" is strictly blocked.`);
+	}
+
 	await mkdir(dirname(archivePath), { recursive: true });
 
 	// Append to archive
@@ -88,7 +93,7 @@ async function archiveOverflow(
 
 	// Try to git add the archive
 	try {
-		execSync(`git add "${archiveFile}"`, { cwd, stdio: "pipe" });
+		execFileSync("git", ["add", archiveFile], { cwd, stdio: "pipe" });
 	} catch {
 		// Not in git, that's fine
 	}
@@ -114,6 +119,10 @@ export function createMemoryTool(cwd: string, pluginLayers?: MemoryLayerDef[]): 
 			const config = await loadMemoryConfig(cwd, pluginLayers);
 			const { path: memoryPath, maxLines } = getWorkingLayer(config);
 			const memoryFile = join(cwd, memoryPath);
+
+			if (isRestrictedPath(memoryPath, cwd)) {
+				throw new Error(`Security exception: Modifying safety-critical file or path "${memoryPath}" is strictly blocked.`);
+			}
 
 			if (action === "load") {
 				try {
@@ -154,10 +163,8 @@ export function createMemoryTool(cwd: string, pluginLayers?: MemoryLayerDef[]): 
 			await writeFile(memoryFile, finalContent, "utf-8");
 
 			try {
-				execSync(`git add "${memoryPath}" && git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, {
-					cwd,
-					stdio: "pipe",
-				});
+				execFileSync("git", ["add", memoryPath], { cwd, stdio: "pipe" });
+				execFileSync("git", ["commit", "-m", commitMsg], { cwd, stdio: "pipe" });
 			} catch (err: any) {
 				const stderr = err.stderr?.toString() || "";
 				return {

@@ -144,17 +144,63 @@ export async function runHooks(
 	return { action: "allow" };
 }
 
+export function isRestrictedPath(targetPath: string, agentDir: string): boolean {
+	if (!targetPath) return false;
+	const resolvedTarget = resolve(agentDir, targetPath);
+	const restrictedPaths = [
+		resolve(agentDir, ".gitagent"),
+		resolve(agentDir, "examples/circuit-breaker"),
+		resolve(agentDir, "hooks"),
+		resolve(agentDir, "agent.yaml")
+	];
+	return restrictedPaths.some(restricted => 
+		resolvedTarget === restricted || resolvedTarget.startsWith(restricted + "/")
+	);
+}
+
+function isCommandModifyingRestricted(command: string): boolean {
+	if (!command) return false;
+	const lowercaseCommand = command.toLowerCase().trim();
+	const targets = [".gitagent", "examples/circuit-breaker", "hooks", "agent.yaml"];
+	const isTargetMentioned = targets.some(t => lowercaseCommand.includes(t));
+	if (!isTargetMentioned) return false;
+
+	const modifyingPatterns = [
+		/>/,             // Output redirection (> or >>)
+		/\brm\b/,        // Remove
+		/\bmv\b/,        // Move
+		/\bcp\b/,        // Copy
+		/\bsed\b/,       // Inline replacements
+		/\btruncate\b/,  // Truncate size
+		/\btee\b/,       // Tee output pipeline
+		/\btouch\b/,     // Modify timestamp/create
+		/\bdd\b/,        // Disk dumper/block copies
+		/\bln\b/,        // Link creators
+		/\bchmod\b/,     // Permission adjustments
+		/\bchown\b/,     // Owner changes
+		/\bunlink\b/,    // Direct unlinking
+		/\bmkdir\b/,     // Directory creation
+		/\brmdir\b/,     // Directory removal
+		/\bgit\s+(?:reset|checkout|clean|revert)\b/ // Restoring changes to security/hook configs
+	];
+	return modifyingPatterns.some(pattern => pattern.test(lowercaseCommand));
+}
+
 /**
- * Wraps a tool's execute function with pre_tool_use hook support.
+ * Wraps a tool's execute function with pre_tool_use hook support and safety-critical path locks.
  */
 export function wrapToolWithHooks<T extends AgentTool<any>>(
 	tool: T,
-	hooksConfig: HooksConfig,
+	hooksConfig: HooksConfig | null,
 	agentDir: string,
 	sessionId: string,
 ): T {
-	const preToolHooks = hooksConfig.hooks.pre_tool_use;
-	if (!preToolHooks || preToolHooks.length === 0) return tool;
+	const preToolHooks = hooksConfig?.hooks?.pre_tool_use;
+	const needsHardcodedGuard = ["write", "edit", "cli"].includes(tool.name);
+	
+	if ((!preToolHooks || preToolHooks.length === 0) && !needsHardcodedGuard) {
+		return tool;
+	}
 
 	const originalExecute = tool.execute;
 
@@ -166,6 +212,21 @@ export function wrapToolWithHooks<T extends AgentTool<any>>(
 			signal?: AbortSignal,
 			onUpdate?: any,
 		) => {
+			// Hardcoded safety-critical path blocker (Self-Modification Vulnerability prevention)
+			if (tool.name === "write" || tool.name === "edit") {
+				if (isRestrictedPath(args.path, agentDir)) {
+					throw new Error(`Security exception: Modifying safety-critical file or path "${args.path}" is strictly blocked.`);
+				}
+			} else if (tool.name === "cli") {
+				if (isCommandModifyingRestricted(args.command)) {
+					throw new Error(`Security exception: Executing command modifying safety-critical path is strictly blocked.`);
+				}
+			}
+
+			if (!preToolHooks || preToolHooks.length === 0) {
+				return originalExecute.call(tool, toolCallId, args, signal, onUpdate);
+			}
+
 			const hookInput = {
 				event: "pre_tool_use",
 				session_id: sessionId,
@@ -180,9 +241,22 @@ export function wrapToolWithHooks<T extends AgentTool<any>>(
 			}
 
 			const finalArgs = result.action === "modify" && result.args ? result.args : args;
+			
+			// Re-verify after hook modification to ensure safety rules aren't bypassed
+			if (tool.name === "write" || tool.name === "edit") {
+				if (isRestrictedPath(finalArgs.path, agentDir)) {
+					throw new Error(`Security exception: Modifying safety-critical file or path "${finalArgs.path}" is strictly blocked.`);
+				}
+			} else if (tool.name === "cli") {
+				if (isCommandModifyingRestricted(finalArgs.command)) {
+					throw new Error(`Security exception: Executing command modifying safety-critical path is strictly blocked.`);
+				}
+			}
+
 			return originalExecute.call(tool, toolCallId, finalArgs, signal, onUpdate);
 		},
 	};
 
 	return wrappedTool as T;
 }
+

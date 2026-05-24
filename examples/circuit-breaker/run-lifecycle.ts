@@ -31,6 +31,7 @@ export interface CircuitBreakerExecutionOptions {
 	branchName?: string;
 	fetchImpl?: typeof fetch;
 	rootDir?: string;
+	updateBaseline?: boolean;
 }
 
 export interface CircuitBreakerRunSummary {
@@ -59,7 +60,7 @@ export async function executeCircuitBreakerRun(
 	const evidence = await writeSessionEvents({ rootDir, sessionId: options.sessionId, events: options.events });
 	const relativeSessionLog = `memory/circuit-breaker/sessions/${options.sessionId}.jsonl`;
 	const identity = await resolveRunIdentity(options);
-	const costAnalysis = await analyzeCostIfPresent(rootDir, options.events, identity);
+	const costAnalysis = await analyzeCostIfPresent(rootDir, options.events, identity, options.updateBaseline);
 
 	const finding = detectToolLoop(evidence.events);
 	if (!finding) {
@@ -210,6 +211,7 @@ async function analyzeCostIfPresent(
 	rootDir: string,
 	events: CircuitBreakerEvent[],
 	identity: { agentName: string; model: string; rulesHash: string },
+	updateBaseline?: boolean,
 ) {
 	const assistantUsageEvents = events.filter((event) => event.type === "assistant_usage");
 	const totalCost = assistantUsageEvents.reduce((sum, event) => sum + event.costUsd, 0);
@@ -220,5 +222,7 @@ async function analyzeCostIfPresent(
 		model: identity.model,
 		rulesHash: identity.rulesHash,
 		costUsd: totalCost,
+	}, {
+		updateBaseline,
 	});
 }

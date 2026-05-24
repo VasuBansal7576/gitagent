@@ -2,6 +2,9 @@ import { Agent } from "@mariozechner/pi-agent-core";
 import type { AgentEvent, AgentTool } from "@mariozechner/pi-agent-core";
 import { streamSimple } from "@mariozechner/pi-ai";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
+import { existsSync } from "fs";
+import { mkdir, writeFile, unlink, readFile } from "fs/promises";
+import { join } from "path";
 import { loadAgent } from "./loader.js";
 import type { AgentManifest } from "./loader.js";
 import { createBuiltinTools } from "./tools/index.js";
@@ -126,13 +129,12 @@ export function query(options: QueryOptions): Query {
 
 	// Async initialization + run
 	const runPromise = (async () => {
+		let dir = options.dir ?? process.cwd();
 		try {
 		// Validate mutually exclusive options
 		if (options.repo && options.sandbox) {
 			throw new Error("repo and sandbox options are mutually exclusive");
 		}
-
-		let dir = options.dir ?? process.cwd();
 
 		// Local repo mode
 		if (options.repo) {
@@ -147,6 +149,50 @@ export function query(options: QueryOptions): Query {
 				session: options.repo.session,
 			});
 			dir = localSession.dir;
+		}
+
+		// Lock workspace to prevent concurrent sessions from corrupting git/memory state
+		const gitagentDir = join(dir, ".gitagent");
+		if (!existsSync(gitagentDir)) {
+			await mkdir(gitagentDir, { recursive: true }).catch(() => {});
+		}
+		const lockfilePath = join(gitagentDir, "workspace.lock");
+		let acquired = false;
+
+		while (!acquired) {
+			try {
+				await writeFile(lockfilePath, process.pid.toString(), { encoding: "utf8", flag: "wx" });
+				acquired = true;
+			} catch (err: any) {
+				if (err.code === "EEXIST") {
+					try {
+						const lockPidStr = await readFile(lockfilePath, "utf8");
+						const lockPid = parseInt(lockPidStr.trim(), 10);
+						if (!isNaN(lockPid)) {
+							let isAlive = false;
+							try {
+								process.kill(lockPid, 0);
+								isAlive = true;
+							} catch (killErr: any) {
+								if (process.platform === "win32" && killErr.code === "EPERM") {
+									isAlive = true;
+								}
+							}
+							if (isAlive) {
+								throw new Error(`Another Gitclaw query (PID ${lockPid}) is actively running in this workspace.`);
+							} else {
+								await unlink(lockfilePath).catch(() => {});
+							}
+						} else {
+							await unlink(lockfilePath).catch(() => {});
+						}
+					} catch (readErr: any) {
+						if (readErr.message.includes("actively running")) throw readErr;
+					}
+				} else {
+					throw err;
+				}
+			}
 		}
 
 		// 1. Load agent
@@ -488,6 +534,17 @@ export function query(options: QueryOptions): Query {
 		// Ensure channel finishes even if no agent_end event
 		channel.finish();
 		} finally {
+			// Release workspace lock file
+			if (typeof dir === "string") {
+				const lockfilePath = join(dir, ".gitagent", "workspace.lock");
+				try {
+					const lockPidStr = await readFile(lockfilePath, "utf8").catch(() => "");
+					if (lockPidStr.trim() === process.pid.toString()) {
+						await unlink(lockfilePath).catch(() => {});
+					}
+				} catch {}
+			}
+
 			// Close the session span on every exit path — success, hook-block
 			// early-return, and the .catch() handler below (rethrow so this
 			// runs first).

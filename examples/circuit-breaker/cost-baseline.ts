@@ -27,6 +27,7 @@ export interface CostDetectionOptions {
 	minBaselineSamples?: number;
 	multiplierOverP95?: number;
 	absoluteFloorUsd?: number;
+	updateBaseline?: boolean;
 }
 
 export type CostClassification =
@@ -85,11 +86,32 @@ export async function analyzeCostAndUpdateBaseline(
 		};
 	}
 
-	const updatedBaseline = await writeUpdatedCostBaseline(rootDir, sample, previousBaseline);
+	if (options.updateBaseline || !previousBaseline) {
+		const updatedBaseline = await writeUpdatedCostBaseline(rootDir, sample, previousBaseline);
+		return {
+			key,
+			previousBaseline,
+			updatedBaseline,
+			classification,
+			path: getCostBaselinePath(rootDir, key),
+		};
+	}
+
 	return {
 		key,
 		previousBaseline,
-		updatedBaseline,
+		updatedBaseline: previousBaseline || {
+			key,
+			agent_name: sample.agentName,
+			model: sample.model,
+			rules_hash: sample.rulesHash,
+			samples: [],
+			sample_count: 0,
+			avg_cost_per_run: 0,
+			p95_cost_per_run: 0,
+			max_observed: 0,
+			last_updated: new Date().toISOString(),
+		},
 		classification,
 		path: getCostBaselinePath(rootDir, key),
 	};
@@ -120,7 +142,7 @@ export function classifyCost(
 		};
 	}
 
-	const ratio = baseline.p95_cost_per_run > 0 ? actualCost / baseline.p95_cost_per_run : 0;
+	const ratio = baseline.p95_cost_per_run > 0 ? actualCost / baseline.p95_cost_per_run : (actualCost >= resolved.absoluteFloorUsd ? 999 : 0);
 	if (ratio >= resolved.multiplierOverP95) {
 		return {
 			type: "cost_anomaly",

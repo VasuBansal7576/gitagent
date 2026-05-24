@@ -26,6 +26,7 @@ export interface CircuitBreakerRunOptions {
 	branchName?: string;
 	fetchImpl?: typeof fetch;
 	rootDir?: string;
+	updateBaseline?: boolean;
 }
 
 export type { CircuitBreakerRunSummary };
@@ -128,32 +129,41 @@ function sessionIdFromFixturePath(path: string): string {
 
 function parseArgs(argv: string[]): CircuitBreakerRunOptions {
 	const options: CircuitBreakerRunOptions = {};
-	for (let index = 0; index < argv.length; index += 1) {
+	let index = 0;
+	const getValue = (argName: string): string => {
+		if (index + 1 >= argv.length) {
+			throw new Error(`Missing value for argument: ${argName}`);
+		}
+		index += 1;
+		return argv[index];
+	};
+
+	for (; index < argv.length; index += 1) {
 		const arg = argv[index];
 		switch (arg) {
 			case "--fixture":
-				options.fixture = argv[++index];
+				options.fixture = getValue(arg);
 				break;
 			case "--agent-dir":
-				options.agentDir = argv[++index];
+				options.agentDir = getValue(arg);
 				break;
 			case "--agent-name":
-				options.agentName = argv[++index];
+				options.agentName = getValue(arg);
 				break;
 			case "--model":
-				options.model = argv[++index];
+				options.model = getValue(arg);
 				break;
 			case "--rules-hash":
-				options.rulesHash = argv[++index];
+				options.rulesHash = getValue(arg);
 				break;
 			case "--prompt":
-				options.prompt = argv[++index];
+				options.prompt = getValue(arg);
 				break;
 			case "--session-id":
-				options.sessionId = argv[++index];
+				options.sessionId = getValue(arg);
 				break;
 			case "--max-tokens":
-				options.maxTokens = parsePositiveInteger(argv[++index], "--max-tokens");
+				options.maxTokens = parsePositiveInteger(getValue(arg), "--max-tokens");
 				break;
 			case "--no-tools":
 				options.noTools = true;
@@ -165,16 +175,19 @@ function parseArgs(argv: string[]): CircuitBreakerRunOptions {
 				options.openPr = true;
 				break;
 			case "--github-repo":
-				options.githubRepository = argv[++index];
+				options.githubRepository = getValue(arg);
 				break;
 			case "--base-branch":
-				options.baseBranch = argv[++index];
+				options.baseBranch = getValue(arg);
 				break;
 			case "--branch-name":
-				options.branchName = argv[++index];
+				options.branchName = getValue(arg);
 				break;
 			case "--root-dir":
-				options.rootDir = argv[++index];
+				options.rootDir = getValue(arg);
+				break;
+			case "--update-baseline":
+				options.updateBaseline = true;
 				break;
 			default:
 				throw new Error(`Unknown argument: ${arg}`);

@@ -20,6 +20,7 @@ export interface ToolLoopDetectorOptions {
 	toolWindow?: number;
 	argSimilarityThreshold?: number;
 	minResultDelta?: number;
+	allowTextFallback?: boolean;
 }
 
 export interface ToolLoopFinding {
@@ -47,6 +48,7 @@ const DEFAULT_TOOL_LOOP_OPTIONS = {
 	toolWindow: 3,
 	argSimilarityThreshold: 0.90,
 	minResultDelta: 0.05,
+	allowTextFallback: false,
 };
 
 export function extractStableResultItems(content: string): string[] {
@@ -92,13 +94,47 @@ export function detectToolLoop(
 		const argSimilarity = averageAdjacentSimilarity(window.map((pair) => stableStringify(pair.toolUse.event.args)));
 		if (argSimilarity < resolved.argSimilarityThreshold) continue;
 
-		const previousItems = pairs
-			.slice(0, start)
-			.flatMap((pair) => extractStableResultItems(pair.toolResult.event.content));
-		const delta = computeResultDelta({
-			previousItems,
-			windowContents: window.map((pair) => pair.toolResult.event.content),
-		});
+		const hasStableItems = window.some((pair) => extractStableResultItems(pair.toolResult.event.content).length > 0);
+		
+		let delta: ResultDeltaResult;
+		
+		if (hasStableItems) {
+			const previousItems = pairs
+				.slice(0, start)
+				.flatMap((pair) => extractStableResultItems(pair.toolResult.event.content));
+			delta = computeResultDelta({
+				previousItems,
+				windowContents: window.map((pair) => pair.toolResult.event.content),
+			});
+		} else if (resolved.allowTextFallback) {
+			// Fallback word-level tokenization to prevent loops on plain text outputs
+			const tokenize = (content: string) => 
+				content.split(/[^A-Za-z0-9_-]+/g).map(t => t.trim()).filter(t => t.length > 0);
+			
+			const windowItems = unique(window.flatMap((pair) => tokenize(pair.toolResult.event.content)));
+			const previousSet = new Set(pairs.slice(0, start).flatMap((pair) => tokenize(pair.toolResult.event.content)));
+			
+			if (windowItems.length === 0) {
+				delta = {
+					resultDelta: "unknown",
+					windowItems: [],
+					newItems: [],
+				};
+			} else {
+				const newItems = windowItems.filter((item) => !previousSet.has(item));
+				delta = {
+					resultDelta: newItems.length / Math.max(1, windowItems.length),
+					windowItems,
+					newItems,
+				};
+			}
+		} else {
+			delta = {
+				resultDelta: "unknown",
+				windowItems: [],
+				newItems: [],
+			};
+		}
 		if (delta.resultDelta === "unknown" || delta.resultDelta >= resolved.minResultDelta) continue;
 
 		const eventIndexes = window.flatMap((pair) => [pair.toolUse.eventIndex, pair.toolResult.eventIndex]);
