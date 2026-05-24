@@ -43,6 +43,36 @@ Most agent frameworks treat configuration as code scattered across your applicat
 
 Fork an agent. Branch a personality. `git log` your agent's memory. Diff its rules. This is **agents as repos**.
 
+## Circuit Breaker Example
+
+This fork includes a GitClaw-native circuit breaker example for runaway agent
+behavior:
+
+```bash
+examples/circuit-breaker/demo.sh
+```
+
+The circuit breaker is not a second runtime and it does not intercept execution.
+It observes the real GitClaw SDK `GCMessage` stream, writes durable evidence
+under `memory/circuit-breaker/`, detects repeated low-progress tool calls and
+cost anomalies, then prepares a targeted rules/skill patch that can become a
+GitHub PR.
+
+The proof chain is deliberately git-native:
+
+1. `query()` emits SDK events from a GitClaw run.
+2. `message-adapter.ts` normalizes the real `GCMessage` shape.
+3. `evidence-writer.ts` writes session JSONL with stable `eventIndex` values.
+4. `detector.ts` cites exact event indexes for loop/cost findings.
+5. `patch-planner.ts` writes a small reviewable patch and PR body.
+6. `github-pr-writer.ts` can open a real PR after local artifact verification.
+
+Reviewer entry points:
+
+- [Circuit Breaker README](./examples/circuit-breaker/README.md)
+- [Proof Report](./examples/circuit-breaker/PROOF.md)
+- [Build Spec](./SPEC.md)
+
 ## One-Command Install
 
 Copy, paste, run. That's it — no cloning, no manual setup. The installer handles everything:
@@ -80,19 +110,19 @@ That's it. Gitclaw auto-scaffolds everything on first run — `agent.yaml`, `SOU
 Clone a GitHub repo, run an agent on it, auto-commit and push to a session branch:
 
 ```bash
-gitclaw --repo https://github.com/org/repo --pat ghp_xxx "Fix the login bug"
+gitclaw --repo https://github.com/org/repo --pat "$GITHUB_TOKEN" "Fix the login bug"
 ```
 
 Resume an existing session:
 
 ```bash
-gitclaw --repo https://github.com/org/repo --pat ghp_xxx --session gitclaw/session-a1b2c3d4 "Continue"
+gitclaw --repo https://github.com/org/repo --pat "$GITHUB_TOKEN" --session gitclaw/session-a1b2c3d4 "Continue"
 ```
 
 Token can come from env instead of `--pat`:
 
 ```bash
-export GITHUB_TOKEN=ghp_xxx
+# Set GITHUB_TOKEN in your shell or secret manager.
 gitclaw --repo https://github.com/org/repo "Add unit tests"
 ```
 
@@ -115,6 +145,12 @@ gitclaw --repo https://github.com/org/repo "Add unit tests"
 npm install gitclaw
 ```
 
+WhatsApp support is an optional integration. To enable it in the voice UI, install the optional peer dependency in the same project:
+
+```bash
+npm install baileys@^7.0.0-rc13
+```
+
 ```typescript
 import { query } from "gitclaw";
 
@@ -134,7 +170,7 @@ for await (const msg of query({
   model: "openai:gpt-4o-mini",
   repo: {
     url: "https://github.com/org/repo",
-    token: process.env.GITHUB_TOKEN!,
+    "token": process.env.GITHUB_TOKEN!,
   },
 })) {
   if (msg.type === "delta") process.stdout.write(msg.content);
@@ -255,7 +291,13 @@ for await (const msg of query({
 | `hooks` | `GCHooks` | Programmatic lifecycle hooks |
 | `maxTurns` | `number` | Max agent turns |
 | `abortController` | `AbortController` | Cancellation signal |
-| `constraints` | `object` | `temperature`, `maxTokens`, `topP`, `topK` |
+| `constraints` | `object` | `temperature`, `maxTokens`, `topP`, `topK`, `stopSequences` |
+
+Gitclaw applies a conservative `maxTokens: 4096` cap when neither
+`agent.yaml` nor `query({ constraints })` defines one. Set
+`GITCLAW_DEFAULT_MAX_TOKENS` to change that safety default, and use per-call
+`constraints.maxTokens` for short endpoints such as summaries, SMS replies, or
+background jobs.
 
 ### Message Types
 
@@ -789,7 +831,7 @@ for await (const msg of query({ prompt: "hello", model: "openai:gpt-4o-mini" }))
 **How do local repo mode sessions work?**
 Clone a GitHub repo, run an agent on it, auto-commit to a session branch:
 ```bash
-gitclaw --repo https://github.com/org/repo --pat ghp_xxx "Fix the bug"
+gitclaw --repo https://github.com/org/repo --pat "$GITHUB_TOKEN" "Fix the bug"
 ```
 Resume with: `gitclaw --repo URL --session gitclaw/session-xxx "Continue"`
 

@@ -6,6 +6,7 @@ import {
 	type ClientMessage,
 	type ServerMessage,
 } from "./adapter.js";
+import { previewForLog } from "./security.js";
 
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
 
@@ -58,10 +59,7 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 		}
 
 		// Fallback: get an ephemeral session token via REST (fetch headers work everywhere)
-		const keyPreview = this.config.apiKey
-			? `${this.config.apiKey.slice(0, 7)}...${this.config.apiKey.slice(-4)} (${this.config.apiKey.length} chars)`
-			: "(empty)";
-		console.log(dim(`[voice] API key: ${keyPreview}`));
+		console.log(dim(`[voice] API key configured: ${this.config.apiKey ? "yes" : "no"}`));
 		const sessionResp = await fetch("https://api.openai.com/v1/realtime/sessions", {
 			method: "POST",
 			headers: {
@@ -378,7 +376,7 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 
 			case "conversation.item.input_audio_transcription.completed":
 				if (event.transcript) {
-					console.log(dim(`[voice] User: ${event.transcript}`));
+					console.log(dim(`[voice] User: ${previewForLog(event.transcript, 80)}`));
 					this.emit({ type: "transcript", role: "user", text: event.transcript });
 				}
 				break;
@@ -411,7 +409,7 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 			case "error": {
 				const errMsg = event.error?.message || "Unknown OpenAI error";
 				const code = event.error?.code || "";
-				console.error(dim(`[voice] Error: ${JSON.stringify(event.error)}`));
+				console.error(dim(`[voice] Error: ${previewForLog(JSON.stringify(event.error), 160)}`));
 				// Don't surface cancellation errors — they happen when user interrupts with no active response
 				if (errMsg.toLowerCase().includes("cancellation failed")) break;
 				// Session expired (60-min cap) — silently reconnect instead of surfacing
@@ -447,12 +445,12 @@ export class OpenAIRealtimeAdapter implements MultimodalAdapter {
 			return;
 		}
 
-		console.log(dim(`[voice] Agent query: ${args.query}`));
+		console.log(dim(`[voice] Agent query: ${previewForLog(args.query, 100)}`));
 		this.emit({ type: "agent_working", query: args.query });
 
 		try {
 			const result = await this.toolHandler(args.query);
-			console.log(dim(`[voice] Agent response: ${result.slice(0, 200)}${result.length > 200 ? "..." : ""}`));
+			console.log(dim(`[voice] Agent response: ${previewForLog(result, 160)}`));
 
 			this.sendRaw({
 				type: "conversation.item.create",

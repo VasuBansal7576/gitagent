@@ -23,7 +23,7 @@ OpenClaw is impressive in breadth. It connects to 20+ messaging channels, has 13
 | **Voice mode** | Real-time bidirectional voice with OpenAI Realtime API, camera/screen input, photo capture | TTS/STT via ElevenLabs, voice notes, no real-time bidirectional |
 | **Skills** | Curated skills marketplace, skill learning (agent creates its own skills), SkillsFlow visual workflow builder | 13,700+ community skills (but ~20% flagged as malicious) |
 | **Memory** | Structured git-committed memory with reinforcement learning, memory archival | Markdown diary entries |
-| **Multi-channel** | Voice UI, Telegram, WhatsApp | 20+ channels |
+| **Multi-channel** | Voice UI, Telegram, WhatsApp via optional `baileys` peer dependency | 20+ channels |
 | **Agent brain** | Pluggable (Claude, GPT, Gemini, Ollama, etc.) | Pluggable (similar range) |
 | **Architecture** | Single focused process, SDK for embedding | Gateway + multiple services |
 
@@ -226,8 +226,8 @@ Pass API keys when creating the sandbox:
 ```bash
 openshell sandbox create \
   --from ./sandboxes/gitclaw \
-  --env OPENAI_API_KEY="sk-..." \
-  --env ANTHROPIC_API_KEY="sk-ant-..." \
+  --env OPENAI_API_KEY="$OPENAI_API_KEY" \
+  --env ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
   --forward 3333 \
   --name gitclaw-dev
 ```

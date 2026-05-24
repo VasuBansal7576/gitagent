@@ -56,6 +56,7 @@ export interface CostAnalysisResult {
 	updatedBaseline: CostBaseline;
 	classification: CostClassification;
 	path: string;
+	quarantinedAnomalyPath?: string;
 }
 
 const DEFAULT_COST_OPTIONS = {
@@ -72,6 +73,18 @@ export async function analyzeCostAndUpdateBaseline(
 	const key = costBaselineKey(sample);
 	const previousBaseline = await readCostBaseline(rootDir, key);
 	const classification = classifyCost(sample.costUsd, previousBaseline, options);
+	if (classification.type === "cost_anomaly" && previousBaseline) {
+		const quarantinedAnomalyPath = await writeQuarantinedCostSample(rootDir, sample, classification, key);
+		return {
+			key,
+			previousBaseline,
+			updatedBaseline: previousBaseline,
+			classification,
+			path: getCostBaselinePath(rootDir, key),
+			quarantinedAnomalyPath,
+		};
+	}
+
 	const updatedBaseline = await writeUpdatedCostBaseline(rootDir, sample, previousBaseline);
 	return {
 		key,
@@ -144,6 +157,10 @@ function getCostBaselinePath(rootDir: string, key: string): string {
 	return join(rootDir, "memory", "circuit-breaker", "baselines", `${key}.yaml`);
 }
 
+function getCostAnomaliesDir(rootDir: string): string {
+	return join(rootDir, "memory", "circuit-breaker", "baselines", "anomalies");
+}
+
 async function writeUpdatedCostBaseline(
 	rootDir: string,
 	sample: CostSample,
@@ -167,6 +184,31 @@ async function writeUpdatedCostBaseline(
 	await mkdir(join(rootDir, "memory", "circuit-breaker", "baselines"), { recursive: true });
 	await writeFile(getCostBaselinePath(rootDir, key), YAML.stringify(baseline), "utf8");
 	return baseline;
+}
+
+async function writeQuarantinedCostSample(
+	rootDir: string,
+	sample: CostSample,
+	classification: Extract<CostClassification, { type: "cost_anomaly" }>,
+	key: string,
+): Promise<string> {
+	const observedAt = normalizeObservedAt(sample.observedAt);
+	const anomaliesDir = getCostAnomaliesDir(rootDir);
+	await mkdir(anomaliesDir, { recursive: true });
+
+	const path = join(anomaliesDir, `${key}__${sanitizeKey(observedAt.toISOString())}.yaml`);
+	const record = {
+		key,
+		agent_name: sample.agentName,
+		model: sample.model,
+		rules_hash: sample.rulesHash,
+		cost_usd: round6(sample.costUsd),
+		observed_at: observedAt.toISOString(),
+		classification,
+		baseline_action: "quarantined_until_human_label",
+	};
+	await writeFile(path, YAML.stringify(record), "utf8");
+	return path;
 }
 
 function percentile(values: number[], p: number): number {

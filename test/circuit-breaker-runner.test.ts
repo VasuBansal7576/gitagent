@@ -1,7 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
-import { mkdtemp } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -103,10 +102,12 @@ describe("circuit breaker fixture runner", () => {
 
 		const patch = await readFile(summary.patchPath, "utf8");
 		const prBody = await readFile(summary.prBodyPath, "utf8");
-		assert.match(patch, /--- a\/agent\.yaml/);
-		assert.match(patch, /budget_guardrails:/);
+		assert.match(patch, /--- \/dev\/null/);
+		assert.match(patch, /\+## Cost Guardrails/);
 		assert.match(prBody, /cost-spike-v1/);
 		assert.match(prBody, /Actual cost: `\$2\.5000`/);
+		assert.ok(summary.costQuarantinePath);
+		await access(summary.costQuarantinePath);
 	});
 
 	it("captures an injected live SDK message source through the same dry-run path", async () => {
@@ -128,8 +129,21 @@ describe("circuit breaker fixture runner", () => {
 		await access(summary.calibrationPath);
 	});
 
+	it("preserves the SDK session id for live captures when --session-id is omitted", async () => {
+		const rootDir = await tempRoot();
+		const summary = await runCircuitBreaker({
+			rootDir,
+			messageSource: liveLoopMessagesWithSdkSessionId("sdk-session-42"),
+			dryRun: true,
+		});
+
+		assert.equal(summary.sessionId, "sdk-session-42");
+		assert.match(summary.sessionEventLog, /sdk-session-42\.jsonl$/);
+	});
+
 	it("opens a GitHub PR after local dry-run artifacts are written", async () => {
 		const rootDir = await tempRoot();
+		const calls: CapturedGitHubCall[] = [];
 		const summary = await runCircuitBreaker({
 			rootDir,
 			fixture: "examples/circuit-breaker/fixtures/search-loop-session.json",
@@ -137,7 +151,7 @@ describe("circuit breaker fixture runner", () => {
 			githubRepository: "vasu/research-agent",
 			githubToken: "gh-test-token",
 			branchName: "circuit-breaker/search-loop-session",
-			fetchImpl: githubFetch(),
+			fetchImpl: githubFetch(calls),
 		});
 
 		assert.equal(summary.findingCount, 1);
@@ -153,6 +167,49 @@ describe("circuit breaker fixture runner", () => {
 		const interventionYaml = await readFile(summary.interventionPath, "utf8");
 		assert.match(interventionYaml, /status: opened_pr/);
 		assert.match(interventionYaml, /pr_url: https:\/\/github\.com\/vasu\/research-agent\/pull\/42/);
+
+		const pullCall = calls.find((call) => call.method === "POST" && call.path.endsWith("/pulls"));
+		assert.ok(pullCall);
+		const localPatch = await readFile(summary.patchPath, "utf8");
+		const localPrBody = await readFile(summary.prBodyPath, "utf8");
+		assert.match(localPatch, /--- a\/RULES\.md/);
+		assert.equal(localPrBody, (pullCall.body as Record<string, unknown>).body);
+	});
+
+	it("blocks live PR mode before network writes when local artifact preflight fails", async () => {
+		const rootDir = await tempRoot();
+		const interventionsDir = join(rootDir, "memory", "circuit-breaker", "interventions");
+		await mkdir(interventionsDir, { recursive: true });
+		await writeFile(
+			join(interventionsDir, "stale.yaml"),
+			[
+				"id: stale",
+				"session_id: search-loop-session",
+				"evidence:",
+				"  session_event_log: memory/circuit-breaker/sessions/search-loop-session.jsonl",
+				"  event_indexes: [0]",
+				"",
+			].join("\n"),
+			"utf8",
+		);
+		const calls: string[] = [];
+
+		await assert.rejects(
+			() => runCircuitBreaker({
+				rootDir,
+				fixture: "examples/circuit-breaker/fixtures/search-loop-session.json",
+				openPr: true,
+				githubRepository: "vasu/research-agent",
+				githubToken: "gh-test-token",
+				fetchImpl: async (input) => {
+					calls.push(String(input));
+					return json({});
+				},
+			}),
+			/stale\.yaml\.patch\.diff/,
+		);
+
+		assert.deepEqual(calls, []);
 	});
 });
 
@@ -175,6 +232,12 @@ async function* liveLoopMessages(): AsyncIterable<GCMessage> {
 	}
 }
 
+function liveLoopMessagesWithSdkSessionId(sessionId: string): AsyncIterable<GCMessage> & { sessionId(): string } {
+	return Object.assign(liveLoopMessages(), {
+		sessionId: () => sessionId,
+	});
+}
+
 function toolUse(toolCallId: string): GCMessage {
 	return {
 		type: "tool_use",
@@ -194,10 +257,18 @@ function toolResult(toolCallId: string): GCMessage {
 	};
 }
 
-function githubFetch(): typeof fetch {
+interface CapturedGitHubCall {
+	method: string;
+	path: string;
+	body?: unknown;
+}
+
+function githubFetch(calls: CapturedGitHubCall[] = []): typeof fetch {
 	return async (input, init = {}) => {
 		const url = new URL(String(input));
 		const method = init.method ?? "GET";
+		const body = init.body ? JSON.parse(String(init.body)) : undefined;
+		calls.push({ method, path: `${url.pathname}${url.search}`, body });
 		if (method === "GET" && url.pathname.endsWith("/git/ref/heads/main")) {
 			return json({ object: { sha: "base-sha" } });
 		}

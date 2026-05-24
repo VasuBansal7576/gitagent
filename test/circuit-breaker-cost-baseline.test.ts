@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { access, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -11,7 +11,7 @@ import {
 } from "../examples/circuit-breaker/cost-baseline.ts";
 
 describe("circuit breaker cost baseline", () => {
-	it("classifies against the previous baseline before updating it", async () => {
+	it("classifies against the previous baseline and quarantines anomalous samples", async () => {
 		const rootDir = await tempRoot();
 
 		for (let index = 0; index < 5; index += 1) {
@@ -28,8 +28,10 @@ describe("circuit breaker cost baseline", () => {
 			assert.equal(result.classification.anomaly_ratio, 4);
 			assert.equal(result.classification.baseline_samples, 5);
 		}
-		assert.equal(result.updatedBaseline.sample_count, 6);
-		assert.equal(result.updatedBaseline.max_observed, 4);
+		assert.equal(result.updatedBaseline.sample_count, 5);
+		assert.equal(result.updatedBaseline.max_observed, 1);
+		assert.ok(result.quarantinedAnomalyPath);
+		await access(result.quarantinedAnomalyPath);
 	});
 
 	it("uses absolute budget warnings until baseline has enough samples", () => {

@@ -6,6 +6,7 @@ import type { GCMessage } from "../src/sdk-types.js";
 import {
 	CircuitBreakerEventSchemaError,
 	adaptGCMessage,
+	extractSessionIdFromGCMessage,
 	type CircuitBreakerEvent,
 	type PersistedCircuitBreakerEvent,
 } from "../examples/circuit-breaker/message-adapter.ts";
@@ -61,6 +62,28 @@ describe("circuit breaker message adapter", () => {
 		assert.equal(adaptGCMessage({ type: "system", subtype: "session_start", content: "start" }), null);
 	});
 
+	it("extracts session ids from system messages without making them detector events", () => {
+		const message: GCMessage = {
+			type: "system",
+			subtype: "session_start",
+			content: "start",
+			metadata: { sessionId: "sdk-session-123" },
+		};
+
+		assert.equal(adaptGCMessage(message), null);
+		assert.equal(extractSessionIdFromGCMessage(message), "sdk-session-123");
+	});
+
+	it("ignores valid assistant messages when usage is unavailable", () => {
+		assert.equal(adaptGCMessage({
+			type: "assistant",
+			content: "done",
+			model: "claude-sonnet-4-20250514",
+			provider: "anthropic",
+			stopReason: "stop",
+		}), null);
+	});
+
 	it("fails loudly when required SDK fields are missing", async () => {
 		const raw = await readJsonFixture("../examples/circuit-breaker/fixtures/malformed-session.json");
 		assert.ok(Array.isArray(raw));
@@ -73,10 +96,17 @@ describe("circuit breaker message adapter", () => {
 		);
 
 		assert.throws(
-			() => adaptGCMessage(raw[1] as GCMessage),
+			() => adaptGCMessage({
+				...(raw[1] as Record<string, unknown>),
+				usage: {
+					inputTokens: 10,
+					outputTokens: 5,
+					costUsd: 0.001,
+				},
+			} as unknown as GCMessage),
 			(error: unknown) =>
 				error instanceof CircuitBreakerEventSchemaError &&
-				error.message === "assistant.usage must be an object",
+				error.message === "assistant.usage.totalTokens must be a finite number",
 		);
 	});
 

@@ -1551,11 +1551,11 @@
         <hr style="border:none;border-top:1px solid #21262d;margin:4px 0;">
         <div>
           <label style="display:block;color:#8b949e;font-size:12px;margin-bottom:4px;">OpenAI API Key <span style="color:#484f58;">(voice)</span></label>
-          <input id="settingsOpenaiKey" type="password" placeholder="sk-..." style="width:100%;padding:8px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:13px;box-sizing:border-box;">
+          <input id="settingsOpenaiKey" type="password" placeholder="OpenAI API key" style="width:100%;padding:8px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:13px;box-sizing:border-box;">
         </div>
         <div>
           <label style="display:block;color:#8b949e;font-size:12px;margin-bottom:4px;">Anthropic API Key <span style="color:#484f58;">(agent brain)</span></label>
-          <input id="settingsAnthropicKey" type="password" placeholder="sk-ant-..." style="width:100%;padding:8px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:13px;box-sizing:border-box;">
+          <input id="settingsAnthropicKey" type="password" placeholder="Anthropic API key" style="width:100%;padding:8px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:13px;box-sizing:border-box;">
         </div>
         <div>
           <label style="display:block;color:#8b949e;font-size:12px;margin-bottom:4px;">Gemini API Key <span style="color:#484f58;">(optional)</span></label>
@@ -1623,7 +1623,7 @@ window.addEventListener('message',function(e){
         alert('Installed');
         // Notify the iframe that install succeeded
         var frame=document.getElementById('skillsFrame');
-        if(frame&&frame.contentWindow)frame.contentWindow.postMessage({type:'install_success',source:source},'*');
+        if(frame&&frame.contentWindow)frame.contentWindow.postMessage({type:'install_success',source:source},window.location.origin);
         // Refresh SkillFlows so newly installed skill appears immediately
         loadFlowSkills();
       } else {
@@ -3002,8 +3002,8 @@ function loadSettings(){
       else{sel.value='';document.getElementById('settingsCustomModel').value=d.model;}
     }
     // Mask keys — show placeholder if set
-    document.getElementById('settingsOpenaiKey').placeholder=d.keys.OPENAI_API_KEY?'••••••••  (set)':'sk-...';
-    document.getElementById('settingsAnthropicKey').placeholder=d.keys.ANTHROPIC_API_KEY?'••••••••  (set)':'sk-ant-...';
+    document.getElementById('settingsOpenaiKey').placeholder=d.keys.OPENAI_API_KEY?'••••••••  (set)':'OpenAI API key';
+    document.getElementById('settingsAnthropicKey').placeholder=d.keys.ANTHROPIC_API_KEY?'••••••••  (set)':'Anthropic API key';
     document.getElementById('settingsGeminiKey').placeholder=d.keys.GEMINI_API_KEY?'••••••••  (set)':'AI...';
     document.getElementById('settingsComposioKey').placeholder=d.keys.COMPOSIO_API_KEY?'••••••••  (set)':'ak_...';
     // Base URL

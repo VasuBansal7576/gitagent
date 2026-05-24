@@ -3,18 +3,21 @@ import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { GCMessage } from "../../src/sdk-types.js";
-import { adaptGCMessage, type CircuitBreakerEvent } from "./message-adapter.ts";
+import type { GCMessage, Query } from "../../src/sdk-types.js";
+import { adaptGCMessage, extractSessionIdFromGCMessage, type CircuitBreakerEvent } from "./message-adapter.ts";
 import { executeCircuitBreakerRun, type CircuitBreakerRunSummary } from "./run-lifecycle.ts";
 
 export interface CircuitBreakerRunOptions {
 	fixture?: string;
 	agentDir?: string;
 	agentName?: string;
+	model?: string;
 	rulesHash?: string;
 	prompt?: string;
 	sessionId?: string;
-	messageSource?: AsyncIterable<GCMessage>;
+	maxTokens?: number;
+	noTools?: boolean;
+	messageSource?: LiveMessageSource;
 	dryRun?: boolean;
 	openPr?: boolean;
 	githubRepository?: string;
@@ -26,6 +29,8 @@ export interface CircuitBreakerRunOptions {
 }
 
 export type { CircuitBreakerRunSummary };
+
+type LiveMessageSource = AsyncIterable<GCMessage> & Partial<Pick<Query, "sessionId">>;
 
 interface FixtureFile {
 	sessionId?: string;
@@ -51,7 +56,7 @@ export async function runCircuitBreaker(options: CircuitBreakerRunOptions): Prom
 
 	return executeCircuitBreakerRun({
 		...options,
-		sessionId: options.sessionId ?? `live-${new Date().toISOString().replace(/\.\d{3}Z$/, "Z").replace(/:/g, "-")}`,
+		sessionId: options.sessionId ?? inferLiveSessionId(source, messages) ?? defaultLiveSessionId(),
 		events: normalizeMessages(messages),
 	});
 }
@@ -65,7 +70,7 @@ function normalizeMessages(messages: unknown[]): CircuitBreakerEvent[] {
 	return events;
 }
 
-async function createLiveMessageSource(options: CircuitBreakerRunOptions): Promise<AsyncIterable<GCMessage>> {
+async function createLiveMessageSource(options: CircuitBreakerRunOptions): Promise<LiveMessageSource> {
 	if (!options.agentDir) {
 		throw new Error("Live mode requires --agent-dir");
 	}
@@ -78,7 +83,28 @@ async function createLiveMessageSource(options: CircuitBreakerRunOptions): Promi
 		dir: options.agentDir,
 		prompt: options.prompt,
 		sessionId: options.sessionId,
+		model: options.model,
+		...(options.noTools ? { replaceBuiltinTools: true, tools: [] } : {}),
+		...(options.maxTokens ? { constraints: { maxTokens: options.maxTokens } } : {}),
 	});
+}
+
+function inferLiveSessionId(source: LiveMessageSource, messages: GCMessage[]): string | null {
+	for (const message of messages) {
+		const sessionId = extractSessionIdFromGCMessage(message);
+		if (sessionId) return sessionId;
+	}
+
+	if (typeof source.sessionId === "function") {
+		const sessionId = source.sessionId();
+		if (sessionId) return sessionId;
+	}
+
+	return null;
+}
+
+function defaultLiveSessionId(): string {
+	return `live-${new Date().toISOString().replace(/\.\d{3}Z$/, "Z").replace(/:/g, "-")}`;
 }
 
 async function loadFixture(path: string): Promise<{ sessionId?: string; messages: unknown[] }> {
@@ -114,6 +140,9 @@ function parseArgs(argv: string[]): CircuitBreakerRunOptions {
 			case "--agent-name":
 				options.agentName = argv[++index];
 				break;
+			case "--model":
+				options.model = argv[++index];
+				break;
 			case "--rules-hash":
 				options.rulesHash = argv[++index];
 				break;
@@ -122,6 +151,12 @@ function parseArgs(argv: string[]): CircuitBreakerRunOptions {
 				break;
 			case "--session-id":
 				options.sessionId = argv[++index];
+				break;
+			case "--max-tokens":
+				options.maxTokens = parsePositiveInteger(argv[++index], "--max-tokens");
+				break;
+			case "--no-tools":
+				options.noTools = true;
 				break;
 			case "--dry-run":
 				options.dryRun = true;
@@ -146,6 +181,14 @@ function parseArgs(argv: string[]): CircuitBreakerRunOptions {
 		}
 	}
 	return options;
+}
+
+function parsePositiveInteger(raw: string | undefined, flag: string): number {
+	const parsed = Number(raw);
+	if (!Number.isInteger(parsed) || parsed <= 0) {
+		throw new Error(`${flag} must be a positive integer`);
+	}
+	return parsed;
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

@@ -82,6 +82,7 @@ export type CircuitBreakerIntervention = ToolLoopIntervention | CostAnomalyInter
 export interface WriteInterventionOptions {
 	rootDir?: string;
 	intervention: CircuitBreakerIntervention;
+	overwrite?: boolean;
 }
 
 export interface WriteInterventionResult {
@@ -92,7 +93,7 @@ export interface WriteInterventionResult {
 export function createToolLoopIntervention(input: ToolLoopInterventionInput): ToolLoopIntervention {
 	const createdAt = normalizeCreatedAt(input.createdAt);
 	return {
-		id: `${formatInterventionTimestamp(createdAt)}-${input.finding.detector}`,
+		id: `${formatInterventionTimestamp(createdAt)}-${sanitizeSlug(input.sessionId)}-${input.finding.detector}`,
 		session_id: input.sessionId,
 		agent: input.agent ?? "unknown",
 		model: input.model ?? "unknown",
@@ -123,7 +124,7 @@ export function createToolLoopIntervention(input: ToolLoopInterventionInput): To
 export function createCostAnomalyIntervention(input: CostAnomalyInterventionInput): CostAnomalyIntervention {
 	const createdAt = normalizeCreatedAt(input.createdAt);
 	return {
-		id: `${formatInterventionTimestamp(createdAt)}-cost-spike-v1`,
+		id: `${formatInterventionTimestamp(createdAt)}-${sanitizeSlug(input.sessionId)}-cost-spike-v1`,
 		session_id: input.sessionId,
 		agent: input.agent ?? "unknown",
 		model: input.model ?? "unknown",
@@ -142,7 +143,7 @@ export function createCostAnomalyIntervention(input: CostAnomalyInterventionInpu
 			type: "pull_request",
 			status: input.status ?? "dry_run",
 			pr_url: input.prUrl ?? null,
-			patch_target: input.patchTarget ?? "agent.yaml",
+			patch_target: input.patchTarget ?? "RULES.md",
 		},
 		human_decision: null,
 		created_at: createdAt.toISOString(),
@@ -154,7 +155,17 @@ export async function writeInterventionRecord(options: WriteInterventionOptions)
 	await mkdir(interventionsDir, { recursive: true });
 
 	const path = join(interventionsDir, `${options.intervention.id}.yaml`);
-	await writeFile(path, YAML.stringify(options.intervention), "utf8");
+	try {
+		await writeFile(path, YAML.stringify(options.intervention), {
+			encoding: "utf8",
+			flag: options.overwrite ? "w" : "wx",
+		});
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+			throw new Error(`Intervention record already exists: ${path}`);
+		}
+		throw error;
+	}
 	return { path, intervention: options.intervention };
 }
 
@@ -169,5 +180,9 @@ function normalizeCreatedAt(createdAt?: Date | string): Date {
 }
 
 function formatInterventionTimestamp(date: Date): string {
-	return date.toISOString().replace(/\.\d{3}Z$/, "Z").replace(/:/g, "-");
+	return date.toISOString().replace(/:/g, "-");
+}
+
+function sanitizeSlug(value: string): string {
+	return value.replace(/[^A-Za-z0-9._-]+/g, "-");
 }

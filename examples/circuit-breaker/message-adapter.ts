@@ -61,7 +61,18 @@ export function adaptGCMessage(message: GCMessage): CircuitBreakerEvent | null {
 	}
 }
 
-function adaptAssistant(message: Record<string, unknown>): CircuitBreakerEvent {
+export function extractSessionIdFromGCMessage(message: GCMessage): string | null {
+	const candidate = message as unknown;
+	if (!isRecord(candidate) || candidate.type !== "system") return null;
+	const metadata = candidate.metadata;
+	if (!isRecord(metadata)) return null;
+	return typeof metadata.sessionId === "string" && metadata.sessionId.length > 0
+		? metadata.sessionId
+		: null;
+}
+
+function adaptAssistant(message: Record<string, unknown>): CircuitBreakerEvent | null {
+	if (message.usage === undefined) return null;
 	const usage = requireRecord(message.usage, "assistant.usage");
 
 	return {

@@ -26,7 +26,7 @@ describe("circuit breaker intervention writer", () => {
 			patchTarget: "skills/research/SKILL.md",
 		});
 
-		assert.equal(intervention.id, "2026-05-23T12-30-00Z-tool-loop-v1");
+		assert.equal(intervention.id, "2026-05-23T12-30-00.000Z-session-abc-tool-loop-v1");
 		assert.equal(intervention.session_id, "session-abc");
 		assert.equal(intervention.detector, "tool-loop-v1");
 		assert.equal(intervention.action.status, "dry_run");
@@ -48,11 +48,61 @@ describe("circuit breaker intervention writer", () => {
 		const result = await writeInterventionRecord({ rootDir, intervention });
 		assert.equal(
 			result.path,
-			join(rootDir, "memory", "circuit-breaker", "interventions", "2026-05-23T12-30-00Z-tool-loop-v1.yaml"),
+			join(rootDir, "memory", "circuit-breaker", "interventions", "2026-05-23T12-30-00.000Z-session-abc-tool-loop-v1.yaml"),
 		);
 
 		const parsed = YAML.parse(await readFile(result.path, "utf8"));
 		assert.deepEqual(parsed, intervention);
+	});
+
+	it("does not silently overwrite intervention records", async () => {
+		const rootDir = await mkdtemp(join(tmpdir(), "gitclaw-cb-"));
+		const intervention = createToolLoopIntervention({
+			sessionId: "session-abc",
+			sessionEventLog: "memory/circuit-breaker/sessions/session-abc.jsonl",
+			finding: finding(),
+			createdAt: "2026-05-23T12:30:00.000Z",
+		});
+
+		await writeInterventionRecord({ rootDir, intervention });
+		await assert.rejects(
+			() => writeInterventionRecord({ rootDir, intervention }),
+			/Intervention record already exists/,
+		);
+		await writeInterventionRecord({
+			rootDir,
+			intervention: {
+				...intervention,
+				action: {
+					...intervention.action,
+					status: "opened_pr",
+					pr_url: "https://github.com/vasu/research-agent/pull/42",
+				},
+			},
+			overwrite: true,
+		});
+
+		const parsed = YAML.parse(await readFile(join(rootDir, "memory", "circuit-breaker", "interventions", `${intervention.id}.yaml`), "utf8"));
+		assert.equal(parsed.action.status, "opened_pr");
+	});
+
+	it("keeps intervention ids distinct for different sessions at the same timestamp", () => {
+		const first = createToolLoopIntervention({
+			sessionId: "session-abc",
+			sessionEventLog: "memory/circuit-breaker/sessions/session-abc.jsonl",
+			finding: finding(),
+			createdAt: "2026-05-23T12:30:00.000Z",
+		});
+		const second = createToolLoopIntervention({
+			sessionId: "session-def",
+			sessionEventLog: "memory/circuit-breaker/sessions/session-def.jsonl",
+			finding: finding(),
+			createdAt: "2026-05-23T12:30:00.000Z",
+		});
+
+		assert.notEqual(first.id, second.id);
+		assert.match(first.id, /session-abc/);
+		assert.match(second.id, /session-def/);
 	});
 
 	it("creates a cost anomaly intervention record with baseline evidence", () => {
@@ -69,10 +119,10 @@ describe("circuit breaker intervention writer", () => {
 			createdAt: "2026-05-23T12:31:00.000Z",
 		});
 
-		assert.equal(intervention.id, "2026-05-23T12-31-00Z-cost-spike-v1");
+		assert.equal(intervention.id, "2026-05-23T12-31-00.000Z-session-cost-cost-spike-v1");
 		assert.equal(intervention.detector, "cost-spike-v1");
 		assert.equal(intervention.severity, "medium");
-		assert.equal(intervention.action.patch_target, "agent.yaml");
+		assert.equal(intervention.action.patch_target, "RULES.md");
 		assert.equal(intervention.evidence.actual_cost_usd, 2.5);
 		assert.equal(intervention.evidence.p95_baseline_usd, 0.5);
 		assert.equal(intervention.evidence.anomaly_ratio, 5);

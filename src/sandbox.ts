@@ -58,7 +58,7 @@ export async function createSandboxContext(
 		);
 	}
 
-	const token = config.token
+	const accessToken = config.token
 		|| process.env.GITHUB_TOKEN
 		|| process.env.GIT_TOKEN;
 
@@ -75,7 +75,7 @@ export async function createSandboxContext(
 		template: config.template,
 		timeout: config.timeout,
 		repository,
-		token,
+		"token": accessToken,
 		session: config.session,
 		autoCommit: config.autoCommit ?? true,
 		envs: config.envs,

@@ -12,7 +12,7 @@ describe("circuit breaker GitHub PR writer", () => {
 		const patchPlan = planPatchForIntervention(intervention);
 
 		const result = await openGitHubPrForPatch({
-			token: "gh-test-token",
+			"token": "gh-test-token",
 			repository: "vasu/research-agent",
 			intervention,
 			patchPlan,
@@ -50,6 +50,9 @@ describe("circuit breaker GitHub PR writer", () => {
 		assert.equal(prBody.head, "circuit-breaker/test-session");
 		assert.equal(prBody.base, "main");
 		assert.match(String(prBody.body), /Event indexes: `2, 3, 4, 5, 6, 7`/);
+		assert.match(result.patch, /--- a\/RULES\.md/);
+		assert.doesNotMatch(result.patch, /--- \/dev\/null/);
+		assert.equal(result.prBody, prBody.body);
 	});
 
 	it("reuses an open PR when the branch and pull request already exist", async () => {
@@ -59,7 +62,7 @@ describe("circuit breaker GitHub PR writer", () => {
 		const existingContent = `# Rules\n\n${renderGuardrailBlock(intervention)}`;
 
 		const result = await openGitHubPrForPatch({
-			token: "gh-test-token",
+			"token": "gh-test-token",
 			repository: "vasu/research-agent",
 			intervention,
 			patchPlan,

@@ -5,13 +5,13 @@ import { query } from "../dist/exports.js";
  * auto-commit changes, and push to a session branch.
  *
  * Usage:
- *   GITHUB_TOKEN=ghp_xxx npx tsx examples/local-repo.ts
+ *   GITHUB_TOKEN="$GITHUB_TOKEN" npx tsx examples/local-repo.ts
  */
 
 const REPO_URL = "https://github.com/shreyas-lyzr/agent-designer";
-const TOKEN = process.env.GITHUB_TOKEN || process.env.GIT_TOKEN || "";
+const accessToken = process.env.GITHUB_TOKEN || process.env.GIT_TOKEN || "";
 
-if (!TOKEN) {
+if (!accessToken) {
 	console.error("Set GITHUB_TOKEN or GIT_TOKEN env var");
 	process.exit(1);
 }
@@ -24,7 +24,7 @@ async function main() {
 		model: "openai:gpt-4o-mini",
 		repo: {
 			url: REPO_URL,
-			token: TOKEN,
+			"token": accessToken,
 			// dir: "/tmp/my-custom-dir",  // optional — defaults to cwd
 			// session: "gitclaw/session-abc123",  // resume an existing session
 		},

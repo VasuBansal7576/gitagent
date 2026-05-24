@@ -1,6 +1,6 @@
 import type { CircuitBreakerIntervention } from "./intervention-writer.ts";
 import type { PatchPlan } from "./patch-planner.ts";
-import { applyPatchPlanToContent } from "./patch-planner.ts";
+import { applyPatchPlanToContent, hydratePatchPlanWithContent } from "./patch-planner.ts";
 
 export interface GitHubPrWriterOptions {
 	token: string;
@@ -21,6 +21,9 @@ export interface GitHubPrResult {
 	target: string;
 	commitSha?: string;
 	alreadyOpen: boolean;
+	patch: string;
+	prTitle: string;
+	prBody: string;
 }
 
 export class GitHubPrError extends Error {
@@ -72,11 +75,11 @@ export async function openGitHubPrForPatch(options: GitHubPrWriterOptions): Prom
 	const baseBranch = options.baseBranch ?? "main";
 	const branchName = options.branchName ?? defaultBranchName(options.intervention);
 	const repo = parseGitHubRepository(options.repository);
-	const api = new GitHubApi({
-		token: options.token,
-		apiBaseUrl: options.apiBaseUrl ?? "https://api.github.com",
-		fetchImpl: options.fetchImpl ?? globalThis.fetch.bind(globalThis),
-	});
+		const api = new GitHubApi({
+			"token": options.token,
+			apiBaseUrl: options.apiBaseUrl ?? "https://api.github.com",
+			fetchImpl: options.fetchImpl ?? globalThis.fetch.bind(globalThis),
+		});
 
 	const baseRef = await api.getJson<GitRefResponse>(
 		`/repos/${repo.owner}/${repo.name}/git/ref/heads/${encodeURIComponent(baseBranch)}`,
@@ -91,13 +94,14 @@ export async function openGitHubPrForPatch(options: GitHubPrWriterOptions): Prom
 	}
 
 	const currentContent = Buffer.from(file.content.replace(/\s/g, ""), "base64").toString("utf8");
-	const patched = applyPatchPlanToContent(currentContent, options.patchPlan);
+	const effectivePatchPlan = hydratePatchPlanWithContent(options.intervention, options.patchPlan, currentContent);
+	const patched = applyPatchPlanToContent(currentContent, effectivePatchPlan);
 	let commitSha: string | undefined;
 	if (patched.changed) {
 		const update = await api.putJson<UpdateFileResponse>(
-			`/repos/${repo.owner}/${repo.name}/contents/${encodeGitHubPath(options.patchPlan.target)}`,
+			`/repos/${repo.owner}/${repo.name}/contents/${encodeGitHubPath(effectivePatchPlan.target)}`,
 			{
-				message: options.patchPlan.prTitle,
+				message: effectivePatchPlan.prTitle,
 				content: Buffer.from(patched.content, "utf8").toString("base64"),
 				sha: file.sha,
 				branch: branchName,
@@ -107,8 +111,8 @@ export async function openGitHubPrForPatch(options: GitHubPrWriterOptions): Prom
 	}
 
 	const pull = await createPullRequestOrReuse(api, repo, {
-		title: options.patchPlan.prTitle,
-		body: options.patchPlan.prBody,
+		title: effectivePatchPlan.prTitle,
+		body: effectivePatchPlan.prBody,
 		head: branchName,
 		base: baseBranch,
 	});
@@ -118,9 +122,12 @@ export async function openGitHubPrForPatch(options: GitHubPrWriterOptions): Prom
 		number: pull.number,
 		branchName,
 		baseBranch,
-		target: options.patchPlan.target,
+		target: effectivePatchPlan.target,
 		commitSha,
 		alreadyOpen: pull.alreadyOpen,
+		patch: effectivePatchPlan.patch,
+		prTitle: effectivePatchPlan.prTitle,
+		prBody: effectivePatchPlan.prBody,
 	};
 }
 

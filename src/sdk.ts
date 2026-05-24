@@ -1,5 +1,6 @@
 import { Agent } from "@mariozechner/pi-agent-core";
 import type { AgentEvent, AgentTool } from "@mariozechner/pi-agent-core";
+import { streamSimple } from "@mariozechner/pi-ai";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import { loadAgent } from "./loader.js";
 import type { AgentManifest } from "./loader.js";
@@ -29,6 +30,10 @@ import {
 	startSessionSpan,
 	recordGenAiCall,
 } from "./telemetry.js";
+import {
+	buildModelOptionsFromConstraints,
+	mergeModelConstraints,
+} from "./model-options.js";
 
 // ── Event channel ──────────────────────────────────────────────────────
 
@@ -131,13 +136,13 @@ export function query(options: QueryOptions): Query {
 
 		// Local repo mode
 		if (options.repo) {
-			const token = options.repo.token || process.env.GITHUB_TOKEN || process.env.GIT_TOKEN;
-			if (!token) {
+			const accessToken = options.repo.token || process.env.GITHUB_TOKEN || process.env.GIT_TOKEN;
+			if (!accessToken) {
 				throw new Error("repo.token, GITHUB_TOKEN, or GIT_TOKEN is required with repo option");
 			}
 			localSession = initLocalSession({
 				url: options.repo.url,
-				token,
+				"token": accessToken,
 				dir: options.repo.dir || dir,
 				session: options.repo.session,
 			});
@@ -277,19 +282,10 @@ export function query(options: QueryOptions): Query {
 			}
 		}
 
-		// 7. Build model options from constraints
-		const modelOptions: Record<string, any> = {};
-		const constraints = options.constraints ?? loaded.manifest.model.constraints;
-		if (constraints) {
-			const c = constraints as any;
-			if (c.temperature !== undefined) modelOptions.temperature = c.temperature;
-			if (c.maxTokens !== undefined) modelOptions.maxTokens = c.maxTokens;
-			if (c.max_tokens !== undefined) modelOptions.maxTokens = c.max_tokens;
-			if (c.topP !== undefined) modelOptions.topP = c.topP;
-			if (c.top_p !== undefined) modelOptions.topP = c.top_p;
-			if (c.topK !== undefined) modelOptions.topK = c.topK;
-			if (c.top_k !== undefined) modelOptions.topK = c.top_k;
-		}
+		// 7. Build model options from manifest + per-call constraints.
+		const modelOptions = buildModelOptionsFromConstraints(
+			mergeModelConstraints(loaded.manifest.model.constraints, options.constraints),
+		);
 
 		if (options.maxTurns !== undefined) {
 			modelOptions.maxTurns = options.maxTurns;
@@ -301,8 +297,11 @@ export function query(options: QueryOptions): Query {
 				systemPrompt,
 				model: loaded.model,
 				tools,
-				...modelOptions,
 			},
+			streamFn: (model, context, streamOptions) => streamSimple(model, context, {
+				...streamOptions,
+				...modelOptions,
+			}),
 		});
 
 		// 9. Subscribe to events and map to GCMessage

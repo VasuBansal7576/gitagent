@@ -3,7 +3,7 @@ import { WebSocketServer, WebSocket as WS } from "ws";
 import { query } from "../sdk.js";
 import type { VoiceServerOptions, ClientMessage, ServerMessage, MultimodalAdapter } from "./adapter.js";
 import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, mkdirSync, appendFileSync, rmSync, createReadStream } from "fs";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { join, dirname, resolve, relative } from "path";
 import { writeFile, readFile, mkdir, stat } from "fs/promises";
 import { fileURLToPath } from "url";
@@ -17,6 +17,16 @@ import { discoverSkills } from "../skills.js";
 import { discoverWorkflows, loadFlowDefinition, saveFlowDefinition, deleteFlowDefinition } from "../workflows.js";
 import { discoverSchedules, saveSchedule, deleteSchedule, updateScheduleMeta } from "../schedules.js";
 import { startScheduler, stopScheduler, reloadSchedules, executeScheduledJob } from "../schedule-runner.js";
+import {
+	CSRF_HEADER,
+	STATE_CHANGING_METHODS,
+	assertVoiceAuthConfig,
+	isLoopbackHost,
+	isSafeSkillSource,
+	previewForLog,
+	resolveInsideRoot,
+	resolveVoiceHost,
+} from "./security.js";
 import cron from "node-cron";
 
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
@@ -62,6 +72,23 @@ function formatArg(a: any): string {
 	if (a instanceof Error) return `${a.message}${a.stack ? "\n" + a.stack : ""}`;
 	try { return JSON.stringify(a, (_k, v) => v instanceof Error ? { message: v.message, stack: v.stack } : v); }
 	catch { return String(a); }
+}
+
+function git(cwd: string, args: string[]): string {
+	return execFileSync("git", args, { cwd, encoding: "utf-8" }).trim();
+}
+
+function gitQuiet(cwd: string, args: string[]): void {
+	execFileSync("git", args, { cwd, stdio: "pipe" });
+}
+
+function isSafeBranchName(branch: string): boolean {
+	return /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(branch)
+		&& !branch.includes("..")
+		&& !branch.includes("@{")
+		&& !branch.endsWith("/")
+		&& !branch.endsWith(".lock")
+		&& !branch.split("/").some(part => part === "" || part === "." || part.endsWith("."));
 }
 
 export function logToBuffer(source: string, level: "info" | "warn" | "error", message: string): LogEntry {
@@ -406,9 +433,8 @@ async function saveMoodEntry(agentDir: string, counts: MoodCounts, messageCount:
 	await writeFile(moodPath, existing, "utf-8");
 
 	try {
-		execSync(`git add "memory/mood.md" && git commit -m "Mood: ${mood} session (${date} ${time})"`, {
-			cwd: agentDir, stdio: "pipe",
-		});
+		gitQuiet(agentDir, ["add", "memory/mood.md"]);
+		gitQuiet(agentDir, ["commit", "-m", `Mood: ${mood} session (${date} ${time})`]);
 	} catch { /* file saved even if commit fails */ }
 }
 
@@ -443,6 +469,7 @@ async function writeJournalEntry(
 			model,
 			env,
 			maxTurns: 1,
+			constraints: { maxTokens: 320 },
 			replaceBuiltinTools: true,
 			tools: [],
 			systemPrompt: "You are journaling about your day as an AI assistant. Write naturally and briefly.",
@@ -472,9 +499,8 @@ async function writeJournalEntry(
 		await writeFile(journalPath, existing, "utf-8");
 
 		try {
-			execSync(`git add "memory/journal/${date}.md" && git commit -m "Journal: ${date} ${time} session reflection"`, {
-				cwd: agentDir, stdio: "pipe",
-			});
+			gitQuiet(agentDir, ["add", `memory/journal/${date}.md`]);
+			gitQuiet(agentDir, ["commit", "-m", `Journal: ${date} ${time} session reflection`]);
 			console.error(dim(`[voice] Journal entry written for ${date} ${time}`));
 		} catch { /* saved even if commit fails */ }
 	} catch (err: any) {
@@ -531,10 +557,8 @@ async function capturePhoto(
 	// Git add + commit
 	const commitMsg = `Capture moment: ${reason}`;
 	try {
-		execSync(`git add "${photoRelPath}" "${INDEX_FILE}" && git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, {
-			cwd: agentDir,
-			stdio: "pipe",
-		});
+		gitQuiet(agentDir, ["add", photoRelPath, INDEX_FILE]);
+		gitQuiet(agentDir, ["commit", "-m", commitMsg]);
 		console.error(dim(`[voice] Photo captured: ${filename}`));
 	} catch (err: any) {
 		console.error(dim(`[voice] Photo saved but git commit failed: ${err.stderr?.toString().trim() || "unknown"}`));
@@ -550,7 +574,7 @@ function saveMemoryInBackground(
 	onComplete?: () => void,
 ): void {
 	const prompt = `The user just said: "${text}"\n\nSave any personal information, preferences, or facts about the user to memory. Use the memory tool to write or update a memory file. Use a descriptive commit message like "Remember: user likes mustangs" or "Save preference: favorite game is GTA 5". Be concise. If there's nothing meaningful to save, do nothing.`;
-	console.error(dim(`[voice] Background memory save triggered for: "${text.slice(0, 60)}..."`));
+	console.error(dim(`[voice] Background memory save triggered: ${previewForLog(text)}`));
 
 	if (onStart) onStart();
 
@@ -563,6 +587,7 @@ function saveMemoryInBackground(
 				model,
 				env,
 				maxTurns: 3,
+				constraints: { maxTokens: 512 },
 			});
 			// Drain the iterator to completion
 			for await (const msg of result) {
@@ -637,6 +662,9 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 	loadEnvFile(resolve(opts.agentDir));
 
 	const port = opts.port || 3333;
+	const host = resolveVoiceHost();
+	const serverPassword = process.env.GITCLAW_PASSWORD || "";
+	assertVoiceAuthConfig(host, Boolean(serverPassword));
 	let agentName = "GitClaw";
 	try {
 		const yamlRaw = readFileSync(join(resolve(opts.agentDir), "agent.yaml"), "utf-8");
@@ -737,6 +765,7 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 				dir: opts.agentDir,
 				model: opts.model,
 				env: opts.env,
+				constraints: { maxTokens: 1800 },
 				...(uiTools.length ? { tools: uiTools } : {}),
 				...(systemPromptSuffix ? { systemPromptSuffix } : {}),
 			});
@@ -751,14 +780,14 @@ export async function startVoiceServer(opts: VoiceServerOptions): Promise<() => 
 					vitalsTokenCount += Math.ceil(msg.content.length / 4);
 				} else if (msg.type === "tool_use") {
 					sendToBrowser({ type: "tool_call", toolName: msg.toolName, args: msg.args });
-					console.log(dim(`[voice] Tool call: ${msg.toolName}(${JSON.stringify(msg.args).slice(0, 80)})`));
+					console.log(dim(`[voice] Tool call: ${msg.toolName}(${previewForLog(JSON.stringify(msg.args), 80)})`));
 				} else if (msg.type === "tool_result") {
 					sendToBrowser({ type: "tool_result", toolName: msg.toolName, content: msg.content, isError: msg.isError });
 					if (msg.content) { toolResults.push(msg.content); vitalsTokenCount += Math.ceil(msg.content.length / 4); }
-					console.log(dim(`[voice] Tool ${msg.toolName}: ${msg.content.slice(0, 100)}${msg.content.length > 100 ? "..." : ""}`));
+					console.log(dim(`[voice] Tool ${msg.toolName}: ${previewForLog(msg.content, 100)}`));
 				} else if (msg.type === "system" && msg.subtype === "error") {
 					errors.push(msg.content);
-					console.error(dim(`[voice] Agent error: ${msg.content}`));
+					console.error(dim(`[voice] Agent error: ${previewForLog(msg.content, 120)}`));
 				} else if (msg.type === "delta" && msg.deltaType === "thinking") {
 					sendToBrowser({ type: "agent_thinking", text: msg.content });
 				}
@@ -872,6 +901,7 @@ ${runningContext}`;
 				dir: opts.agentDir,
 				model: opts.model,
 				env: opts.env,
+				constraints: { maxTokens: 1200 },
 			});
 
 			let stepOutput = "";
@@ -891,14 +921,14 @@ ${runningContext}`;
 	// ── File API helpers ────────────────────────────────────────────────
 	const HIDDEN_DIRS = new Set([".git", "node_modules", ".gitagent", "dist", ".next", "__pycache__", ".venv"]);
 	const agentRoot = resolve(opts.agentDir);
-	let activeBranch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: agentRoot, encoding: "utf-8" }).trim();
+	let activeBranch = git(agentRoot, ["rev-parse", "--abbrev-ref", "HEAD"]);
 	const pendingShutdownWork: Promise<any>[] = [];
 
 	// ── Composio integration (optional) ────────────────────────────────
 	let composioAdapter: ComposioAdapter | null = null;
 	if (process.env.COMPOSIO_API_KEY) {
 		composioAdapter = new ComposioAdapter({
-			apiKey: process.env.COMPOSIO_API_KEY,
+			"apiKey": process.env.COMPOSIO_API_KEY,
 			userId: process.env.COMPOSIO_USER_ID || "default",
 		});
 		console.log(dim("[voice] Composio integration enabled"));
@@ -1091,7 +1121,7 @@ ${runningContext}`;
 						// Empty = block all, * = allow all, otherwise check username list
 						if (!telegramAllowedUsers.has("*")) {
 							if (telegramAllowedUsers.size === 0 || !telegramAllowedUsers.has(fromUsername)) {
-								console.log(dim(`[telegram] Blocked message from unauthorized user: @${fromUsername || "(no username)"} (${fromName})`));
+								console.log(dim(`[telegram] Blocked unauthorized user: @${previewForLog(fromUsername || "(no username)", 48)} (${previewForLog(fromName, 48)})`));
 								continue;
 							}
 						}
@@ -1123,7 +1153,7 @@ ${runningContext}`;
 
 						// ── Approval gate reply check ──
 						if (userText && handleApprovalReply(userText)) {
-							console.log(dim(`[telegram] Approval reply from ${fromName}: ${userText}`));
+							console.log(dim(`[telegram] Approval reply from ${previewForLog(fromName, 48)}: ${previewForLog(userText)}`));
 							const approvalMsg: ServerMessage = { type: "transcript", role: "user", text: `[Telegram] ${fromName}: ${userText}` };
 							appendMessage(serverOpts.agentDir, activeBranch, approvalMsg);
 							broadcastToBrowsers(approvalMsg);
@@ -1131,13 +1161,13 @@ ${runningContext}`;
 						}
 
 						const fullText = `${userText}${imageContext}`.trim();
-						console.log(dim(`[telegram] ${fromName}: ${fullText.slice(0, 100)}`));
+						console.log(dim(`[telegram] ${previewForLog(fromName, 48)}: ${previewForLog(fullText)}`));
 
 						// ── Trigger check ──
 						if (userText) {
 							const trigger = matchTrigger(agentDir, "telegram", fromName, userText);
 							if (trigger) {
-								console.log(dim(`[triggers] Matched trigger ${trigger.id} for Telegram/${fromName}: "${userText.slice(0, 60)}" → "${trigger.reply.slice(0, 60)}"`));
+								console.log(dim(`[triggers] Matched trigger ${trigger.id} for Telegram/${fromName}: "${previewForLog(userText)}" -> "${previewForLog(trigger.reply)}"`));
 								try {
 									await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
 										method: "POST",
@@ -1201,6 +1231,7 @@ ${runningContext}`;
 								model: serverOpts.model,
 								env: serverOpts.env,
 								maxTurns: 10,
+								constraints: { maxTokens: 1200 },
 								systemPrompt: tgSystemPrompt,
 								...(tgTools.length ? { tools: tgTools } : {}),
 							});
@@ -1372,7 +1403,7 @@ ${runningContext}`;
 
 					const sent = await sock.sendMessage(jid, { text: args.message });
 					if (sent?.key?.id) whatsappSentIds.add(sent.key.id);
-					console.log(dim(`[whatsapp] Sent message to ${displayName} (${jid}): ${args.message.slice(0, 80)}`));
+					console.log(dim(`[whatsapp] Sent message to ${previewForLog(displayName, 48)} (${jid}): ${previewForLog(args.message, 80)}`));
 					return `Message sent to ${displayName}.`;
 				},
 			},
@@ -1391,7 +1422,7 @@ ${runningContext}`;
 					const digits = args.phone.replace(/[^0-9]/g, "");
 					const jid = `${digits}@s.whatsapp.net`;
 					upsertContact(agentDir, { name: args.name, phone: digits, jid });
-					console.log(dim(`[whatsapp] Saved contact: ${args.name} → ${digits}`));
+					console.log(dim(`[whatsapp] Saved contact: ${previewForLog(args.name, 48)} -> ${digits}`));
 					return `Contact "${args.name}" saved with phone ${digits}.`;
 				},
 			},
@@ -1485,7 +1516,7 @@ ${runningContext}`;
 					const triggers = loadTriggers(agentDir);
 					triggers.push(trigger);
 					saveTriggers(agentDir, triggers);
-					console.log(dim(`[triggers] Created: when ${trigger.from} says "${trigger.pattern}" → "${trigger.reply}" (${trigger.platform})`));
+					console.log(dim(`[triggers] Created: when ${previewForLog(trigger.from, 48)} says "${previewForLog(trigger.pattern)}" -> "${previewForLog(trigger.reply)}" (${trigger.platform})`));
 					return `Trigger created (id: ${trigger.id}). When ${trigger.from} sends a message matching "${trigger.pattern}", I'll auto-reply: "${trigger.reply}"`;
 				},
 			},
@@ -1543,6 +1574,16 @@ ${runningContext}`;
 	}
 
 	async function startWhatsApp(agentDir: string, serverOpts: VoiceServerOptions) {
+		let baileys;
+		try {
+			baileys = await import("baileys");
+		} catch (err: any) {
+			if (err?.code === "ERR_MODULE_NOT_FOUND" || /Cannot find package 'baileys'/.test(String(err?.message))) {
+				throw new Error("WhatsApp integration requires the optional peer dependency: npm install baileys@^7.0.0-rc13");
+			}
+			throw err;
+		}
+
 		const {
 			default: makeWASocket,
 			useMultiFileAuthState,
@@ -1550,7 +1591,7 @@ ${runningContext}`;
 			fetchLatestBaileysVersion,
 			DisconnectReason,
 			jidNormalizedUser,
-		} = await import("baileys");
+		} = baileys;
 
 		const authDir = join(agentDir, ".gitagent/whatsapp-auth");
 		mkdirSync(authDir, { recursive: true });
@@ -1580,7 +1621,7 @@ ${runningContext}`;
 				whatsappQrCode = null;
 				const jid = sock.user?.id || "";
 				whatsappPhoneNumber = jid.replace(/:.*@/, "@").replace("@s.whatsapp.net", "");
-				console.log(dim(`[whatsapp] Connected: ${whatsappPhoneNumber}`));
+				console.log(dim(`[whatsapp] Connected: ${previewForLog(String(whatsappPhoneNumber || ""), 48)}`));
 				broadcastToBrowsers({ type: "whatsapp_status", connected: true, phoneNumber: whatsappPhoneNumber } as any);
 			}
 			if (connection === "close") {
@@ -1609,7 +1650,7 @@ ${runningContext}`;
 			if (!ownJid) return;
 
 			for (const msg of messages) {
-				console.log(dim(`[whatsapp] msg: remoteJid=${msg.key.remoteJid}, fromMe=${msg.key.fromMe}, ownJid=${ownJid}, ownLid=${ownLid}, id=${msg.key.id}`));
+				console.log(dim(`[whatsapp] msg: fromMe=${Boolean(msg.key.fromMe)}, self=${Boolean(ownJid)}, id=${previewForLog(String(msg.key.id || ""), 24)}`));
 				// Skip agent's own replies
 				if (whatsappSentIds.has(msg.key.id!)) continue;
 
@@ -1629,7 +1670,7 @@ ${runningContext}`;
 
 					const trigger = matchTrigger(agentDir, "whatsapp", senderContact?.name || senderJid, incomingText);
 					if (trigger) {
-						console.log(dim(`[triggers] Matched trigger ${trigger.id} for ${senderName}: "${incomingText.slice(0, 60)}" → "${trigger.reply.slice(0, 60)}"`));
+						console.log(dim(`[triggers] Matched trigger ${trigger.id} for ${previewForLog(senderName, 48)}: "${previewForLog(incomingText)}" -> "${previewForLog(trigger.reply)}"`));
 						try {
 							const sent = await sock.sendMessage(senderJid, { text: trigger.reply });
 							if (sent?.key?.id) whatsappSentIds.add(sent.key.id);
@@ -1651,11 +1692,11 @@ ${runningContext}`;
 				const text = incomingText;
 				const replyJid = senderJid;
 				lastWhatsAppJid = replyJid;
-				console.log(dim(`[whatsapp] Self-DM: ${text.slice(0, 100)}`));
+				console.log(dim(`[whatsapp] Self-DM: ${previewForLog(text)}`));
 
 				// ── Approval gate reply check ──
 				if (handleApprovalReply(text)) {
-					console.log(dim(`[whatsapp] Approval reply: ${text}`));
+						console.log(dim(`[whatsapp] Approval reply: ${previewForLog(text)}`));
 					const approvalMsg: ServerMessage = { type: "transcript", role: "user", text: `[WhatsApp]: ${text}` };
 					appendMessage(serverOpts.agentDir, activeBranch, approvalMsg);
 					broadcastToBrowsers(approvalMsg);
@@ -1700,6 +1741,7 @@ ${runningContext}`;
 						model: serverOpts.model,
 						env: serverOpts.env,
 						maxTurns: 10,
+						constraints: { maxTokens: 1200 },
 						systemPrompt: waSystemPrompt,
 						tools: waTools,
 					});
@@ -1782,12 +1824,10 @@ ${runningContext}`;
 		startWhatsApp(agentRoot, opts).catch(() => {});
 	}
 
-	/** Resolve and validate a requested path stays within agentDir */
-	function safePath(reqPath: string): string | null {
-		const abs = resolve(agentRoot, reqPath);
-		if (!abs.startsWith(agentRoot)) return null;
-		return abs;
-	}
+		/** Resolve and validate a requested path stays within agentDir */
+		function safePath(reqPath: string): string | null {
+			return resolveInsideRoot(agentRoot, reqPath);
+		}
 
 	interface FileEntry {
 		name: string;
@@ -1834,24 +1874,32 @@ ${runningContext}`;
 		}
 	}
 
-	function readBody(req: IncomingMessage): Promise<string> {
-		return new Promise((res, rej) => {
-			let body = "";
-			req.on("data", (c: Buffer) => { body += c.toString(); });
-			req.on("end", () => res(body));
-			req.on("error", rej);
-		});
-	}
-
-	function jsonReply(res: ServerResponse, status: number, data: any) {
-		if (status >= 500 && data && data.error) {
-			console.error(`[http] 500 response: ${data.error}`);
-		} else if (status >= 400 && data && data.error) {
-			console.warn(`[http] ${status} response: ${data.error}`);
+		function readBody(req: IncomingMessage, maxBytes = 1024 * 1024): Promise<string> {
+			return new Promise((res, rej) => {
+				let body = "";
+				let bytes = 0;
+				req.on("data", (c: Buffer) => {
+					bytes += c.length;
+					if (bytes > maxBytes) {
+						req.destroy(new Error(`Request body too large (>${maxBytes} bytes)`));
+						return;
+					}
+					body += c.toString();
+				});
+				req.on("end", () => res(body));
+				req.on("error", rej);
+			});
 		}
-		res.writeHead(status, { "Content-Type": "application/json" });
-		res.end(JSON.stringify(data));
-	}
+
+		function jsonReply(res: ServerResponse, status: number, data: any) {
+			if (status >= 500 && data && data.error) {
+				console.error(`[http] 500 response: ${previewForLog(String(data.error), 120)}`);
+			} else if (status >= 400 && data && data.error) {
+				console.warn(`[http] ${status} response: ${previewForLog(String(data.error), 120)}`);
+			}
+			res.writeHead(status, { "Content-Type": "application/json" });
+			res.end(JSON.stringify(data));
+		}
 
 	function escapeXml(s: string): string {
 		return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -1860,9 +1908,10 @@ ${runningContext}`;
 	// ── Password protection ──────────────────────────────────────────
 	// Auth gates the UI when GITCLAW_PASSWORD is set. GITCLAW_USERNAME is
 	// optional and defaults to "admin" when a password is configured.
-	const serverPassword = process.env.GITCLAW_PASSWORD || "";
-	const serverUsername = process.env.GITCLAW_USERNAME || (serverPassword ? "admin" : "");
-	const authCookieName = "gitclaw_auth";
+		const serverUsername = process.env.GITCLAW_USERNAME || (serverPassword ? "admin" : "");
+		const authCookieName = "gitclaw_auth";
+		const cookieSecure = process.env.GITCLAW_COOKIE_SECURE === "true" ||
+			(!isLoopbackHost(host) && process.env.GITCLAW_COOKIE_SECURE !== "false");
 
 	function generateAuthToken(): string {
 		// Hash username + password + salt so changing either invalidates existing cookies.
@@ -1886,6 +1935,49 @@ ${runningContext}`;
 		const bb = Buffer.from(b);
 		if (ab.length !== bb.length) return false;
 		return timingSafeEqual(ab, bb);
+	}
+
+	const allowedOrigins = new Set([
+		`http://localhost:${port}`,
+		`http://127.0.0.1:${port}`,
+		`http://[::1]:${port}`,
+		`http://${host}:${port}`,
+	]);
+	for (const origin of (process.env.GITCLAW_CORS_ORIGIN || "").split(",")) {
+		const trimmed = origin.trim();
+		if (trimmed) allowedOrigins.add(trimmed);
+	}
+
+	function setCorsHeaders(req: IncomingMessage, res: ServerResponse): boolean {
+		const origin = req.headers.origin;
+		if (!origin) return true;
+		if (!allowedOrigins.has(origin)) return false;
+		res.setHeader("Vary", "Origin");
+		res.setHeader("Access-Control-Allow-Origin", origin);
+		res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+		res.setHeader("Access-Control-Allow-Headers", `Content-Type, ${CSRF_HEADER}`);
+		return true;
+	}
+
+	function hasValidStateChangeOrigin(req: IncomingMessage): boolean {
+		const method = req.method || "GET";
+		if (!STATE_CHANGING_METHODS.has(method)) return true;
+		const origin = req.headers.origin;
+		return !origin || allowedOrigins.has(origin);
+	}
+
+	const rateBuckets = new Map<string, { resetAt: number; count: number }>();
+	function checkRateLimit(req: IncomingMessage, bucket: string, limit: number, windowMs: number): boolean {
+		const now = Date.now();
+		const remote = req.socket.remoteAddress || "unknown";
+		const key = `${bucket}:${remote}`;
+		const current = rateBuckets.get(key);
+		if (!current || current.resetAt <= now) {
+			rateBuckets.set(key, { resetAt: now + windowMs, count: 1 });
+			return true;
+		}
+		current.count += 1;
+		return current.count <= limit;
 	}
 
 	const loginPageHtml = `<!DOCTYPE html>
@@ -1927,25 +2019,35 @@ return false;
 }
 </script></body></html>`;
 
-	// HTTP server
-	const httpServer: Server = createServer(async (req, res) => {
-		const reqStart = Date.now();
-		res.setHeader("Access-Control-Allow-Origin", "*");
-		res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-		res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+		// HTTP server
+		const httpServer: Server = createServer(async (req, res) => {
+			const reqStart = Date.now();
+			if (!setCorsHeaders(req, res)) {
+				res.writeHead(403, { "Content-Type": "application/json" });
+				return res.end(JSON.stringify({ error: "Origin not allowed" }));
+			}
 
-		if (req.method === "OPTIONS") {
-			res.writeHead(204);
-			return res.end();
-		}
+			if (req.method === "OPTIONS") {
+				res.writeHead(204);
+				return res.end();
+			}
 
-		const url = new URL(req.url || "/", `http://localhost:${port}`);
+			const url = new URL(req.url || "/", `http://localhost:${port}`);
+			const isApi = url.pathname.startsWith("/api/");
+			if (url.pathname === "/api/auth" && !checkRateLimit(req, "auth", 10, 60_000)) {
+				return jsonReply(res, 429, { error: "Too many authentication attempts" });
+			}
+			if (isApi && !checkRateLimit(req, "api", 240, 60_000)) {
+				return jsonReply(res, 429, { error: "Too many requests" });
+			}
+			if (!hasValidStateChangeOrigin(req)) {
+				return jsonReply(res, 403, { error: "Invalid request origin" });
+			}
 
-		// Log every HTTP request (skip UI + static paths to reduce noise; always log API/errors)
-		const isApi = url.pathname.startsWith("/api/");
-		res.on("finish", () => {
-			if (isApi || res.statusCode >= 400) {
-				const dur = Date.now() - reqStart;
+			// Log every HTTP request (skip UI + static paths to reduce noise; always log API/errors)
+			res.on("finish", () => {
+				if (isApi || res.statusCode >= 400) {
+					const dur = Date.now() - reqStart;
 				const level = res.statusCode >= 500 ? "error" : res.statusCode >= 400 ? "warn" : "log";
 				const line = `[http] ${req.method} ${url.pathname} → ${res.statusCode} (${dur}ms)`;
 				if (level === "error") console.error(line);
@@ -1957,19 +2059,22 @@ return false;
 		res.on("error", (err) => console.error(`[http] Response error on ${req.method} ${url.pathname}: ${err.message}`));
 
 		// ── Auth endpoints (always accessible) ──
-		if (url.pathname === "/api/auth" && req.method === "POST") {
-			let body: { username?: string; password?: string };
-			try {
-				body = JSON.parse(await readBody(req));
+			if (url.pathname === "/api/auth" && req.method === "POST") {
+				let body: { username?: string; password?: string };
+				try {
+					body = JSON.parse(await readBody(req));
 			} catch {
 				return jsonReply(res, 400, { ok: false, error: "Invalid request" });
 			}
-			const userOk = timingSafeEqualStr(String(body.username ?? ""), serverUsername);
-			const passOk = timingSafeEqualStr(String(body.password ?? ""), serverPassword);
-			if (userOk && passOk && serverPassword) {
-				res.setHeader("Set-Cookie", `${authCookieName}=${generateAuthToken()}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400`);
-				jsonReply(res, 200, { ok: true });
-			} else {
+				const userOk = timingSafeEqualStr(String(body.username ?? ""), serverUsername);
+				const passOk = timingSafeEqualStr(String(body.password ?? ""), serverPassword);
+				if (userOk && passOk && serverPassword) {
+					res.setHeader(
+						"Set-Cookie",
+						`${authCookieName}=${generateAuthToken()}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400${cookieSecure ? "; Secure" : ""}`,
+					);
+					jsonReply(res, 200, { ok: true });
+				} else {
 				jsonReply(res, 401, { ok: false, error: "Incorrect username or password" });
 			}
 			return;
@@ -2170,9 +2275,9 @@ return false;
 				jsonReply(res, 500, { error: err.message });
 			}
 
-		} else if (url.pathname === "/api/file" && req.method === "PUT") {
-			// Write a file
-			const body = await readBody(req);
+			} else if (url.pathname === "/api/file" && req.method === "PUT") {
+				// Write a file
+				const body = await readBody(req, MAX_FILE_BYTES);
 			let parsed: { path: string; content: string };
 			try {
 				parsed = JSON.parse(body);
@@ -2324,7 +2429,7 @@ return false;
 
 			if (smsBody) {
 				// Incoming SMS
-				console.log(dim(`[phone] SMS from ${from}: ${smsBody.slice(0, 100)}`));
+				console.log(dim(`[phone] SMS from ${previewForLog(from, 48)}: ${previewForLog(smsBody)}`));
 				const userMsg: ServerMessage = { type: "transcript", role: "user", text: `[SMS ${from}]: ${smsBody}` };
 				appendMessage(opts.agentDir, activeBranch, userMsg);
 				broadcastToBrowsers(userMsg);
@@ -2335,7 +2440,7 @@ return false;
 				const trigger = matchTrigger(opts.agentDir, "phone", contact?.name || from, smsBody);
 
 				if (trigger) {
-					console.log(dim(`[triggers] Phone trigger ${trigger.id}: "${smsBody.slice(0, 40)}" → "${trigger.reply.slice(0, 40)}"`));
+					console.log(dim(`[triggers] Phone trigger ${trigger.id}: "${previewForLog(smsBody)}" -> "${previewForLog(trigger.reply)}"`));
 					// Reply with TwiML
 					res.writeHead(200, { "Content-Type": "text/xml" });
 					res.end(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeXml(trigger.reply)}</Message></Response>`);
@@ -2365,6 +2470,7 @@ return false;
 						model: opts.model,
 						env: opts.env,
 						maxTurns: 5,
+						constraints: { maxTokens: 400 },
 						systemPrompt: phoneSystemPrompt,
 						...(phoneTools.length ? { tools: phoneTools } : {}),
 					});
@@ -2381,13 +2487,13 @@ return false;
 					res.writeHead(200, { "Content-Type": "text/xml" });
 					res.end(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeXml(reply)}</Message></Response>`);
 				} catch (err: any) {
-					console.error(dim(`[phone] Agent error: ${err.message}`));
+						console.error(dim(`[phone] Agent error: ${previewForLog(String(err.message), 120)}`));
 					res.writeHead(200, { "Content-Type": "text/xml" });
 					res.end(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>Sorry, something went wrong.</Message></Response>`);
 				}
 			} else if (callStatus) {
 				// Voice call webhook — just acknowledge for now
-				console.log(dim(`[phone] Call from ${from}, status: ${callStatus}`));
+					console.log(dim(`[phone] Call from ${previewForLog(from, 48)}, status: ${previewForLog(callStatus, 32)}`));
 				res.writeHead(200, { "Content-Type": "text/xml" });
 				res.end(`<?xml version="1.0" encoding="UTF-8"?><Response><Say>This number is managed by ${agentName}. Please send a text message instead.</Say></Response>`);
 			} else {
@@ -2401,22 +2507,21 @@ return false;
 			// Send a message to the opener window and close the popup.
 			res.writeHead(200, { "Content-Type": "text/html" });
 			res.end(`<!DOCTYPE html><html><body><script>
-				if(window.opener){window.opener.postMessage({type:'composio_auth_complete'},'*');}
+				if(window.opener){window.opener.postMessage({type:'composio_auth_complete'},window.location.origin);}
 				window.close();
 				</script><p>Authentication complete. You can close this window.</p></body></html>`);
 
-		// ── Chat branch API routes ──────────────────────────────────────
-		} else if (url.pathname === "/api/chat/list" && req.method === "GET") {
-			try {
-				const git = (cmd: string) => execSync(cmd, { cwd: agentRoot, encoding: "utf-8" }).trim();
-				const current = git("git rev-parse --abbrev-ref HEAD");
-				// List branches matching chat/* pattern, plus the current branch
-				let branches: string[];
+			// ── Chat branch API routes ──────────────────────────────────────
+			} else if (url.pathname === "/api/chat/list" && req.method === "GET") {
 				try {
-					branches = git("git branch --list 'chat/*' --sort=-committerdate --format='%(refname:short)|%(committerdate:relative)'")
-						.split("\n").filter(Boolean);
-				} catch {
-					branches = [];
+					const current = git(agentRoot, ["rev-parse", "--abbrev-ref", "HEAD"]);
+					// List branches matching chat/* pattern, plus the current branch
+					let branches: string[];
+					try {
+						branches = git(agentRoot, ["branch", "--list", "chat/*", "--sort=-committerdate", "--format=%(refname:short)|%(committerdate:relative)"])
+							.split("\n").filter(Boolean);
+					} catch {
+						branches = [];
 				}
 				const chats = branches.map((line) => {
 					const [branch, time] = line.split("|");
@@ -2432,57 +2537,56 @@ return false;
 				jsonReply(res, 500, { error: err.message });
 			}
 
-		} else if (url.pathname === "/api/chat/new" && req.method === "POST") {
-			try {
-				const git = (cmd: string) => execSync(cmd, { cwd: agentRoot, encoding: "utf-8" }).trim();
-				// Generate branch name: chat/YYYY-MM-DD-HHMMSS
-				const now = new Date();
-				const pad = (n: number) => String(n).padStart(2, "0");
-				const branch = `chat/${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-				// Stage and commit any pending changes on current branch
+			} else if (url.pathname === "/api/chat/new" && req.method === "POST") {
 				try {
-					git("git add -A");
-					git('git commit -m "auto-save before new chat" --allow-empty');
-				} catch {
-					// No changes to commit, that's fine
-				}
-				// Create and switch to new branch
-				git(`git checkout -b ${branch}`);
-				activeBranch = branch;
-				jsonReply(res, 200, { branch });
-			} catch (err: any) {
+					// Generate branch name: chat/YYYY-MM-DD-HHMMSS
+					const now = new Date();
+					const pad = (n: number) => String(n).padStart(2, "0");
+					const branch = `chat/${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+					// Stage and commit any pending changes on current branch
+					try {
+						gitQuiet(agentRoot, ["add", "-A"]);
+						gitQuiet(agentRoot, ["commit", "-m", "auto-save before new chat", "--allow-empty"]);
+					} catch {
+						// No changes to commit, that's fine
+					}
+					// Create and switch to new branch
+					git(agentRoot, ["checkout", "-b", branch]);
+					activeBranch = branch;
+					jsonReply(res, 200, { branch });
+				} catch (err: any) {
 				jsonReply(res, 500, { error: err.message });
 			}
 
-		} else if (url.pathname === "/api/chat/switch" && req.method === "POST") {
-			try {
-				const body = await readBody(req);
-				const { branch } = JSON.parse(body);
-				if (!branch) return jsonReply(res, 400, { error: "Missing branch" });
-				const git = (cmd: string) => execSync(cmd, { cwd: agentRoot, encoding: "utf-8" }).trim();
-				// Auto-save current branch
+			} else if (url.pathname === "/api/chat/switch" && req.method === "POST") {
 				try {
-					git("git add -A");
-					git('git commit -m "auto-save before switching chat" --allow-empty');
-				} catch {}
-				git(`git checkout ${branch}`);
-				activeBranch = branch;
-				jsonReply(res, 200, { branch });
-			} catch (err: any) {
+					const body = await readBody(req);
+					const { branch } = JSON.parse(body);
+					if (!branch) return jsonReply(res, 400, { error: "Missing branch" });
+					if (!isSafeBranchName(branch)) return jsonReply(res, 400, { error: "Invalid branch name" });
+					// Auto-save current branch
+					try {
+						gitQuiet(agentRoot, ["add", "-A"]);
+						gitQuiet(agentRoot, ["commit", "-m", "auto-save before switching chat", "--allow-empty"]);
+					} catch {}
+					git(agentRoot, ["checkout", branch]);
+					activeBranch = branch;
+					jsonReply(res, 200, { branch });
+				} catch (err: any) {
 				jsonReply(res, 500, { error: err.message });
 			}
 
-		} else if (url.pathname === "/api/chat/delete" && req.method === "POST") {
-			try {
-				const body = await readBody(req);
-				const { branch } = JSON.parse(body);
-				if (!branch) return jsonReply(res, 400, { error: "Missing branch" });
-				const git = (cmd: string) => execSync(cmd, { cwd: agentRoot, encoding: "utf-8" }).trim();
-				const current = git("git rev-parse --abbrev-ref HEAD");
-				if (branch === current) return jsonReply(res, 400, { error: "Cannot delete the active branch" });
-				git(`git branch -D ${branch}`);
-				deleteHistory(opts.agentDir, branch);
-				jsonReply(res, 200, { ok: true });
+			} else if (url.pathname === "/api/chat/delete" && req.method === "POST") {
+				try {
+					const body = await readBody(req);
+					const { branch } = JSON.parse(body);
+					if (!branch) return jsonReply(res, 400, { error: "Missing branch" });
+					if (!isSafeBranchName(branch)) return jsonReply(res, 400, { error: "Invalid branch name" });
+					const current = git(agentRoot, ["rev-parse", "--abbrev-ref", "HEAD"]);
+					if (branch === current) return jsonReply(res, 400, { error: "Cannot delete the active branch" });
+					git(agentRoot, ["branch", "-D", branch]);
+					deleteHistory(opts.agentDir, branch);
+					jsonReply(res, 200, { ok: true });
 			} catch (err: any) {
 				jsonReply(res, 500, { error: err.message });
 			}
@@ -2704,16 +2808,15 @@ return false;
 				const contentType = proxyRes.headers.get("content-type") || "";
 
 				// Non-HTML resources: pass through directly
-				if (!contentType.includes("text/html")) {
-					const buffer = Buffer.from(await proxyRes.arrayBuffer());
-					res.writeHead(proxyRes.status, {
-						"Content-Type": contentType,
-						"Cache-Control": proxyRes.headers.get("cache-control") || "public, max-age=3600",
-						"Access-Control-Allow-Origin": "*",
-					});
-					res.end(buffer);
-					return;
-				}
+					if (!contentType.includes("text/html")) {
+						const buffer = Buffer.from(await proxyRes.arrayBuffer());
+						res.writeHead(proxyRes.status, {
+							"Content-Type": contentType,
+							"Cache-Control": proxyRes.headers.get("cache-control") || "public, max-age=3600",
+						});
+						res.end(buffer);
+						return;
+					}
 
 				let html = await proxyRes.text();
 
@@ -2855,7 +2958,7 @@ return false;
           e.stopPropagation();
           btn.disabled = true;
           btn.textContent = 'Installing...';
-          window.parent.postMessage({ type: 'install_skill', source: source }, '*');
+	          window.parent.postMessage({ type: 'install_skill', source: source }, window.location.origin);
         };
       }
       target.parentElement.insertBefore(btn, target.nextSibling);
@@ -2912,7 +3015,7 @@ return false;
 
 				html = html.replace(/<\/body>/i, injectedScript + "</body>");
 
-				res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Access-Control-Allow-Origin": "*" });
+					res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
 				res.end(html);
 			} catch (err: any) {
 				// Fallback if skills.sh is unreachable
@@ -2947,18 +3050,21 @@ a{color:#58a6ff;}</style></head>
 			let body = "";
 			for await (const chunk of req) body += chunk;
 			try {
-				const { source } = JSON.parse(body) as { source: string };
-				if (!source) return jsonReply(res, 400, { error: "Missing source" });
+					const { source } = JSON.parse(body) as { source: string };
+					if (!source) return jsonReply(res, 400, { error: "Missing source" });
 
-				// Shell out to the skills CLI — it handles all install logic
-				const cleanSource = source.replace(/^https?:\/\/github\.com\//, "");
-				const skillsDir = join(agentRoot, "skills");
-				const before = new Set(existsSync(skillsDir) ? readdirSync(skillsDir) : []);
+					// Shell out to the skills CLI — it handles all install logic
+					const cleanSource = source.replace(/^https?:\/\/github\.com\//, "");
+					if (!isSafeSkillSource(cleanSource)) {
+						return jsonReply(res, 400, { error: "Invalid skill source" });
+					}
+					const skillsDir = join(agentRoot, "skills");
+					const before = new Set(existsSync(skillsDir) ? readdirSync(skillsDir) : []);
 
-				execSync(`npx -y skills add -y ${cleanSource} --agent openclaw`, {
-					cwd: agentRoot,
-					encoding: "utf-8",
-					timeout: 120000,
+					execFileSync("npx", ["-y", "skills", "add", "-y", cleanSource, "--agent", "openclaw"], {
+						cwd: agentRoot,
+						encoding: "utf-8",
+						timeout: 120000,
 				});
 
 				// Detect which skill directories were added (symlinked into skills/)
@@ -2988,9 +3094,9 @@ a{color:#58a6ff;}</style></head>
 
 	// WebSocket server — adapter-agnostic proxy
 	const wss = new WebSocketServer({ server: httpServer });
-	wss.on("error", (err: Error) => {
-		console.error(`[voice] WebSocket server error: ${err.message}\n${err.stack}`);
-	});
+		wss.on("error", (err: Error) => {
+			console.error(`[voice] WebSocket server error: ${previewForLog(err.message, 120)}`);
+		});
 
 	wss.on("connection", async (browserWs: WS, req: IncomingMessage) => {
 		// Check auth on WebSocket connections
@@ -3193,7 +3299,7 @@ a{color:#58a6ff;}</style></head>
 				}
 				adapter?.send(msg);
 			} catch (err: any) {
-				console.error(`[voice] WS message handler error: ${err?.message || err}${err?.stack ? "\n" + err.stack : ""}`);
+				console.error(`[voice] WS message handler error: ${previewForLog(String(err?.message || err), 120)}`);
 			}
 		});
 
@@ -3216,18 +3322,18 @@ a{color:#58a6ff;}</style></head>
 		});
 	});
 
-	await new Promise<void>((resolve) => {
-		httpServer.listen(port, () => resolve());
-	});
+		await new Promise<void>((resolve) => {
+			httpServer.listen(port, host, () => resolve());
+		});
 
-	console.log(bold(`Voice server running on :${port}`));
+		console.log(bold(`Voice server running on ${host}:${port}`));
 	console.log(dim(`[voice] Backend: ${opts.adapter}`));
 	console.log(dim(`[voice] Agent dir: ${agentRoot}`));
 	console.log(dim(`[voice] Model: ${opts.model || "(default)"}`));
 	console.log(dim(`[voice] Composio: ${composioAdapter ? "enabled" : "disabled"}`));
 	console.log(dim(`[voice] Telegram: ${telegramToken ? "configured" : "not configured"}`));
 	console.log(dim(`[voice] Auth: ${serverPassword ? `protected (user "${serverUsername}")` : "open — set GITCLAW_PASSWORD (and optionally GITCLAW_USERNAME) to require login"}`));
-	console.log(dim(`[voice] Open http://localhost:${port} in your browser`));
+		console.log(dim(`[voice] Open http://${host === "0.0.0.0" ? "localhost" : host}:${port} in your browser`));
 
 	// Start the cron scheduler
 	startScheduler(schedulerOpts).catch((err) => console.error(dim(`[scheduler] Init error: ${err.message}`)));

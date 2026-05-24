@@ -108,6 +108,10 @@ real GitClaw run
 This is the product proof chain. If any link is missing, the demo becomes less
 trustworthy.
 
+Live proof should be cost-bounded. The fixture detector remains LLM-free, but
+`run.ts` live capture exposes `--max-tokens` and the proof scripts expose
+`MAX_TOKENS` so a demo cannot accidentally become an uncapped generation run.
+
 ### SDK Event Contract
 
 Do not guess the message shape. The detector must import the real exported SDK
@@ -117,11 +121,11 @@ type and normalize from that type:
 import type { GCMessage } from "../../src/sdk-types.js";
 ```
 
-Current required fields from `GCMessage`:
+Current fields consumed from `GCMessage`:
 
-| Message type | Required fields for this project |
+| Message type | Fields used by this project |
 |---|---|
-| `assistant` | `model`, `provider`, `stopReason`, `usage.totalTokens`, `usage.costUsd`, `usage.inputTokens`, `usage.outputTokens` |
+| `assistant` | `model`, `provider`, `stopReason`; when `usage` is present, preserve `usage.totalTokens`, `usage.costUsd`, `usage.inputTokens`, `usage.outputTokens` |
 | `tool_use` | `toolCallId`, `toolName`, `args` |
 | `tool_result` | `toolCallId`, `toolName`, `content`, `isError` |
 | `system` | `subtype`, `content`, `metadata.sessionId` when present |
@@ -181,9 +185,11 @@ Add tests that fail loudly if the SDK shape drifts:
 - compile-time type test imports `GCMessage` and passes representative messages
   through the adapter
 - runtime fixture test asserts `toolCallId`, `toolName`, `args`, and
-  `usage.totalTokens`/`usage.costUsd` are preserved
+  `usage.totalTokens`/`usage.costUsd` are preserved when usage exists
 - malformed fixture test asserts missing required fields throw a clear error
   instead of producing a false negative
+- assistant messages without `usage` are valid SDK messages; ignore them for cost
+  analysis rather than failing loop detection
 
 This is the main handoff risk. Nail it before polishing README/demo copy.
 
@@ -198,7 +204,7 @@ Good v1 behavior:
 1. Observe a GitClaw run.
 2. Detect repeated tool calls, low state progress, or cost spikes.
 3. Write an intervention record to `memory/circuit-breaker/interventions/`.
-4. Generate a narrow patch against `RULES.md`, `agent.yaml`, or a relevant
+4. Generate a narrow patch against `RULES.md` or a relevant
    `skills/<name>/SKILL.md`.
 5. In dry-run mode, save the patch and PR body locally.
 6. In live PR mode, open a reviewable PR from a branch.
@@ -285,7 +291,9 @@ iteration count, and label the finding `medium` confidence.
 
 Detect when a session cost is meaningfully above prior clean sessions for the same agent and model.
 
-Important correction: compare against the previous baseline before writing the new sample.
+Important correction: compare against the previous clean baseline before writing
+the new sample. If the current sample is a statistical anomaly, quarantine it
+outside the clean baseline until a human labels the intervention.
 
 Baseline key:
 
@@ -309,8 +317,9 @@ Cost spike is supporting evidence in the five-minute demo, not the main proof.
 The main proof should be the deterministic tool-loop detector because it works
 with one captured run. Cost baselines become stronger after repeated real runs.
 Once a cost spike has at least five baseline samples, it can produce a targeted
-`agent.yaml` budget-guardrail PR. Low-sample absolute budget warnings remain
-evidence only.
+`RULES.md` cost guardrail PR. Low-sample absolute budget warnings remain
+evidence only. Do not patch `agent.yaml` with budget keys unless GitClaw runtime
+enforcement for those keys exists.
 
 ### P2: No Progress
 
@@ -359,7 +368,7 @@ Allowed patch targets:
 
 - `RULES.md`
 - `skills/<affected-skill>/SKILL.md`
-- `agent.yaml` runtime limits if appropriate
+- `agent.yaml` runtime limits only when the current GitClaw runtime enforces them
 - `hooks/hooks.yaml` only if the project already uses hooks
 
 Do not push directly to `main`.
@@ -370,7 +379,7 @@ The patch must be targeted to the failure surface:
 |---|---|---|
 | repeated search/read/list tool with low result delta | affected `skills/<name>/SKILL.md` or `RULES.md` | add max attempts and stop after two zero-new-result calls |
 | repeated shell/file tool with same args | `RULES.md` or hook config | require changing search strategy after repeated identical command output |
-| cost spike with no loop | `agent.yaml` | lower `max_tokens`, add budget warning, or switch to cheaper model if repo policy allows |
+| cost spike with no loop | `RULES.md` | add a cost review threshold and require scope narrowing before continuing expensive runs |
 | dangerous or high-blast-radius tool | existing hook config | add `pre_tool_use` block or require approval |
 
 Avoid canned patches. The PR body should show why the selected file is the right
@@ -427,26 +436,20 @@ The example can be run in fixture mode or live mode.
 
 ```bash
 # Fixture mode for repeatable review
-npm run build
-node --experimental-strip-types examples/circuit-breaker/run.ts \
-  --fixture examples/circuit-breaker/fixtures/search-loop-session.json \
-  --dry-run
+examples/circuit-breaker/demo.sh
 
 # Live mode around a real GitClaw run
-node --experimental-strip-types examples/circuit-breaker/run.ts \
-  --agent-dir ./agents/research-agent \
-  --agent-name research-agent \
-  --prompt "Research the same narrow topic until you have ten unique sources" \
-  --dry-run
+AGENT_DIR=./agents/research-agent \
+PROMPT="Research the same narrow topic until you have ten unique sources" \
+REQUIRE_INTERVENTION=1 \
+examples/circuit-breaker/live-proof.sh
 
 # Live PR mode after dry-run evidence is correct
-GITHUB_TOKEN=ghp_... node --experimental-strip-types examples/circuit-breaker/run.ts \
-  --agent-dir ./agents/research-agent \
-  --agent-name research-agent \
-  --prompt "Research the same narrow topic until you have ten unique sources" \
-  --open-pr \
-  --github-repo YOUR_USERNAME/research-agent \
-  --base-branch main
+# Set GITHUB_TOKEN in your shell or secret manager before running this.
+GITHUB_REPO=YOUR_USERNAME/research-agent \
+AGENT_DIR=./agents/research-agent \
+PROMPT="Research the same narrow topic until you have ten unique sources" \
+examples/circuit-breaker/pr-proof.sh
 ```
 
 `--dry-run` means write the intervention record and PR body locally, but do not open a GitHub PR.
@@ -454,6 +457,15 @@ GITHUB_TOKEN=ghp_... node --experimental-strip-types examples/circuit-breaker/ru
 `--open-pr` can be used only after dry-run evidence is correct. The command first
 writes local evidence, intervention YAML, patch, and PR-body artifacts; then it
 creates or reuses a GitHub branch and PR through the GitHub REST API.
+
+`verify-artifacts.ts` is the proof gate for demos. It checks session JSONL event
+indexes, intervention evidence references, patch/PR-body artifacts, and
+calibration output.
+
+`examples/circuit-breaker/PROOF.md` is the reviewer-facing evidence summary. It
+keeps the ambition intact while making the proof boundary explicit:
+deterministic detector proof, live SDK/provider capture, and real PR
+intervention are three views of one product chain, not three disconnected demos.
 
 ## 9. Validation Checklist
 
@@ -469,27 +481,28 @@ Before showing this as an assignment/demo:
 - fixture mode produces no intervention for a normal fixture
 - live dry-run writes an intervention record under `memory/circuit-breaker/interventions/`
 - intervention records cite exact session event indexes
-- baseline is read before it is updated
+- baseline is read before clean samples update it; statistical anomalies are quarantined
 - cost spike is not presented as statistical unless baseline sample count is sufficient
 - calibration treats unlabeled intervention records as pending, not as wins
 - secrets are never written to git
 - PR patch is targeted to the failure surface and touches only intended files
 - live PR mode creates/reuses a branch and PR only after local artifacts exist
 - README explains fixture evidence versus live evidence
+- demo scripts run artifact verification, not just the detector
+- live proof commands set an explicit output-token cap
 
 ## 10. Demo Script
 
 Five-minute demo:
 
 1. Open this GitClaw fork and show the circuit breaker example.
-2. Run live dry-run around a GitClaw session and show the captured session JSONL.
-3. Show deterministic detection with exact event indexes.
+2. Run `examples/circuit-breaker/demo.sh` to prove deterministic regression behavior.
+3. Run `examples/circuit-breaker/live-proof.sh` around a GitClaw session and show the captured session JSONL.
 4. Show the intervention YAML in `memory/circuit-breaker/interventions/`.
 5. Show `memory/circuit-breaker/calibration.md` and point out pending decisions are not counted as precision.
 6. Show the generated targeted patch and PR body.
-7. Optionally run `--open-pr` with a test repo and show the reviewable PR.
-8. Run fixture mode briefly to show regression coverage.
-9. Say: "The agent did not need a dashboard. The repo captured the behavior, the detector wrote evidence, and the fix is reviewable like code."
+7. Optionally run `examples/circuit-breaker/pr-proof.sh` with a test repo and show the reviewable PR.
+8. Say: "The agent did not need a dashboard. The repo captured the behavior, the detector wrote evidence, and the fix is reviewable like code."
 
 ## 11. What Not To Build In V1
 

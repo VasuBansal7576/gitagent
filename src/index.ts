@@ -30,6 +30,10 @@ import {
 	recordGenAiCall,
 	shutdownTelemetry,
 } from "./telemetry.js";
+import {
+	DEFAULT_MAX_TOKENS,
+	buildModelOptionsFromConstraints,
+} from "./model-options.js";
 
 // ANSI helpers
 const dim = (s: string) => `\x1b[2m${s}\x1b[0m`;
@@ -251,6 +255,8 @@ async function ensureRepo(dir: string, model?: string): Promise<string> {
 			"model:",
 			`  preferred: "${defaultModel}"`,
 			"  fallback: []",
+			"  constraints:",
+			`    max_tokens: ${DEFAULT_MAX_TOKENS}`,
 			"tools: [cli, read, write, memory]",
 			"runtime:",
 			"  max_turns: 50",
@@ -355,11 +361,11 @@ async function main(): Promise<void> {
 	// Create sandbox context if --sandbox flag is set
 	let sandboxCtx: SandboxContext | undefined;
 	if (useSandbox) {
-		const sandboxConfig: SandboxConfig = {
-			provider: "e2b",
-			repository: sandboxRepo,
-			token: sandboxToken,
-		};
+			const sandboxConfig: SandboxConfig = {
+				provider: "e2b",
+				repository: sandboxRepo,
+				"token": sandboxToken,
+			};
 		sandboxCtx = await createSandboxContext(sandboxConfig, resolve(dir));
 		console.log(dim("Starting sandbox VM..."));
 		await sandboxCtx.gitMachine.start();
@@ -398,25 +404,25 @@ async function main(): Promise<void> {
 	// Voice mode
 	if (voice) {
 		let adapterBackend: "openai-realtime" | "gemini-live";
-		let apiKey: string | undefined;
+		let providerCredential: string | undefined;
 
 		if (voice === "gemini") {
 			adapterBackend = "gemini-live";
-			apiKey = process.env.GEMINI_API_KEY || "";
-			if (!apiKey) {
+			providerCredential = process.env["GEMINI_API_KEY"] || "";
+			if (!providerCredential) {
 				console.log(dim("[voice] No GEMINI_API_KEY — voice disabled, text-only mode"));
 			}
 		} else {
 			adapterBackend = "openai-realtime";
-			apiKey = process.env.OPENAI_API_KEY || "";
-			if (!apiKey) {
+			providerCredential = process.env["OPENAI_API_KEY"] || "";
+			if (!providerCredential) {
 				console.log(dim("[voice] No OPENAI_API_KEY — voice disabled, text-only mode"));
 			}
 		}
 
 		const cleanup = await startVoiceServer({
 			adapter: adapterBackend,
-			adapterConfig: { apiKey },
+			adapterConfig: { "apiKey": providerCredential },
 			agentDir: dir,
 			model,
 			env,
@@ -543,16 +549,9 @@ async function main(): Promise<void> {
 	// isn't initialised (wrapToolWithOtel returns the tool unchanged).
 	tools = tools.map(wrapToolWithOtel);
 
-	// Build model options from manifest constraints
-	const modelOptions: Record<string, any> = {};
-	if (manifest.model.constraints) {
-		const c = manifest.model.constraints;
-		if (c.temperature !== undefined) modelOptions.temperature = c.temperature;
-		if (c.max_tokens !== undefined) modelOptions.maxTokens = c.max_tokens;
-		if (c.top_p !== undefined) modelOptions.topP = c.top_p;
-		if (c.top_k !== undefined) modelOptions.topK = c.top_k;
-		if (c.stop_sequences !== undefined) modelOptions.stopSequences = c.stop_sequences;
-	}
+	// Build model options from manifest constraints, with a conservative
+	// output-token safety cap for older agents that do not define max_tokens.
+	const modelOptions = buildModelOptionsFromConstraints(manifest.model.constraints);
 
 	// OpenTelemetry session span — covers the whole CLI lifetime.
 	const _session = startSessionSpan("gitclaw.agent.session", {

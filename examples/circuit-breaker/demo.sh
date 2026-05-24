@@ -12,6 +12,13 @@ node --experimental-strip-types examples/circuit-breaker/run.ts \
   --fixture examples/circuit-breaker/fixtures/search-loop-session.json \
   --dry-run \
   --root-dir "${ROOT_DIR}"
+node --experimental-strip-types examples/circuit-breaker/verify-artifacts.ts \
+  --root-dir "${ROOT_DIR}" \
+  --session-id search-loop-session \
+  --expect-interventions 1 \
+  --require-patch \
+  --require-pr-body \
+  --require-calibration
 
 echo "[demo] normal fixture: should write evidence only"
 node --experimental-strip-types examples/circuit-breaker/run.ts \
@@ -24,6 +31,9 @@ node --experimental-strip-types examples/circuit-breaker/run.ts \
   --fixture examples/circuit-breaker/fixtures/cost-spike-session.json \
   --dry-run \
   --root-dir "${ROOT_DIR}"
+node --experimental-strip-types examples/circuit-breaker/verify-artifacts.ts \
+  --root-dir "${ROOT_DIR}" \
+  --require-calibration
 
 echo "[demo] artifacts"
 find "${ROOT_DIR}/memory/circuit-breaker" -type f | sort

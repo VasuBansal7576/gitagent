@@ -124,13 +124,13 @@ async function searchLocalSkills(agentDir: string, objective: string): Promise<S
 }
 
 async function searchSkillsMP(objective: string): Promise<SkillMatch[]> {
-	const apiKey = process.env.SKILLSMP_API_KEY;
-	if (!apiKey) return [];
+	const skillSearchCredential = process.env.SKILLSMP_API_KEY;
+	if (!skillSearchCredential) return [];
 
 	try {
 		const url = `https://api.skillsmp.com/v1/search?q=${encodeURIComponent(objective)}`;
 		const resp = await fetch(url, {
-			headers: { Authorization: `Bearer ${apiKey}` },
+			headers: { Authorization: `Bearer ${skillSearchCredential}` },
 			signal: AbortSignal.timeout(5000),
 		});
 		if (!resp.ok) return [];
