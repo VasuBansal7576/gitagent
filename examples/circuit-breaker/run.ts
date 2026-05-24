@@ -131,11 +131,12 @@ function parseArgs(argv: string[]): CircuitBreakerRunOptions {
 	const options: CircuitBreakerRunOptions = {};
 	let index = 0;
 	const getValue = (argName: string): string => {
-		if (index + 1 >= argv.length) {
+		const value = argv[index + 1];
+		if (!value || value.startsWith("--")) {
 			throw new Error(`Missing value for argument: ${argName}`);
 		}
 		index += 1;
-		return argv[index];
+		return value;
 	};
 
 	for (; index < argv.length; index += 1) {

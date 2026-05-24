@@ -3,25 +3,29 @@
 Date: 2026-05-24
 Branch: `codex/circuit-breaker`
 
-## What Was Proven
+## Proof Boundary
 
-The circuit breaker has three proof paths. They are separate on purpose:
+The circuit breaker has regression checks and submission proof. They are
+separate on purpose.
 
 | Proof path | Evidence | Result |
 |---|---|---|
-| Deterministic detector proof | `examples/circuit-breaker/demo.sh` | Passed; loop fixture produced one intervention, normal fixture produced none, low-sample cost fixture stayed advisory |
-| Live SDK/provider proof | `examples/circuit-breaker/live-proof.sh` with Groq | Passed; real `query()` stream produced assistant usage evidence with `provider: groq` and `stopReason: stop` |
-| Real GitHub PR proof | GitHub REST PR writer | Passed; opened `https://github.com/VasuBansal7576/gitagent/pull/1` |
+| Regression detector check | `examples/circuit-breaker/demo.sh` | Passed; useful for repeatability, not submission proof |
+| Live SDK/provider proof | `examples/circuit-breaker/live-proof.sh` with Groq credentials | Passed; real `query()` stream produced repeated real `read` calls and one intervention |
+| Live GitHub PR proof | `examples/circuit-breaker/pr-proof.sh` with Groq credentials, `GITHUB_TOKEN`, and `GITHUB_REPO` | Passed; opened `https://github.com/VasuBansal7576/gitagent/pull/2` |
 
-This combination is the product proof:
+This is the product proof:
 
-1. The detector is deterministic and regression-testable.
+1. The detector remains regression-testable.
 2. The adapter observes real GitClaw SDK messages from a live provider run.
-3. The intervention path can produce a real human-reviewable GitHub PR.
+3. A real detected intervention can produce a real human-reviewable GitHub PR.
+
+For the subsystem architecture, component boundaries, design decisions, risk
+register, and reviewer checklist, see [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ## Latest Evidence
 
-### Fixture Incident
+### Regression Incident
 
 Command:
 
@@ -38,51 +42,62 @@ Observed result:
 - low-sample cost fixture wrote an absolute budget warning only
 - artifact verification passed
 
+This is regression evidence only. It is not counted as final submission proof.
+
 ### Live Provider Capture
 
-Command shape:
+Command:
 
 ```bash
+GROQ_API_KEY=<from local env> \
 MODEL=groq:llama-3.3-70b-versatile \
-PROMPT="Say ok in one short sentence." \
-MAX_TOKENS=128 \
-NO_TOOLS=1 \
+AGENT_DIR=examples/circuit-breaker/live-agent \
+PROMPT="Stress-test the circuit breaker: read EVIDENCE.md four times with the exact same tool input before answering. Do not modify files." \
+MAX_TOKENS=2048 \
+REQUIRE_INTERVENTION=1 \
 examples/circuit-breaker/live-proof.sh
 ```
 
-Verified event:
+Observed result:
 
-```json
-{
-  "type": "assistant_usage",
-  "model": "llama-3.3-70b-versatile",
-  "provider": "groq",
-  "inputTokens": 820,
-  "outputTokens": 3,
-  "totalTokens": 823,
-  "costUsd": 0.00048617,
-  "stopReason": "stop"
-}
-```
+- session: `live-proof-20260524T152019Z`
+- normalized events: `10`
+- finding count: `1`
+- provider/model: `groq:llama-3.3-70b-versatile`
+- live tool: `read`
+- artifact verification passed
 
 This proves the circuit breaker can capture a real GitClaw SDK/provider run
 without relying on fixture-only evidence.
 
-### GitHub PR Intervention
+### Live GitHub PR Intervention
 
-PR: `https://github.com/VasuBansal7576/gitagent/pull/1`
+Command:
+
+```bash
+GROQ_API_KEY=<from local env> \
+GITHUB_TOKEN=<from gh auth token> \
+GITHUB_REPO=VasuBansal7576/gitagent \
+MODEL=groq:llama-3.3-70b-versatile \
+MAX_TOKENS=2048 \
+examples/circuit-breaker/pr-proof.sh
+```
+
+PR: `https://github.com/VasuBansal7576/gitagent/pull/2`
 
 Observed result:
 
-- branch: `circuit-breaker/2026-05-24T11-14-38.724Z-github-pr-fixture-20260524T111438Z-tool-loop-v1`
+- session: `pr-proof-20260524T152037Z`
+- normalized events: `10`
+- branch: `circuit-breaker/2026-05-24T15-20-41.286Z-pr-proof-20260524T152037Z-tool-loop-v1`
 - target: `RULES.md`
-- commit: `6ce2fa0`
-- PR title: `circuit-breaker: add guardrail for search_docs loop`
+- commit: `e4de36711c4e313465875fc35981fc6fa7b9a7b8`
+- PR title: `circuit-breaker: add guardrail for read loop`
 - status: open
+- artifact verification passed
 
-The PR was created from deterministic incident evidence. That is intentional:
-the PR proof validates the external intervention machinery without depending on
-LLM randomness during a presentation.
+This check proves the GitHub writer can create a branch, update `RULES.md`, and
+open a PR from a live SDK/provider run.
 
 ## Trust Boundary
 
@@ -92,7 +107,7 @@ What this project claims:
 - records event-indexed evidence under `memory/circuit-breaker/`
 - classifies cost behavior without poisoning baselines with anomalies
 - writes an intervention YAML, unified patch, PR body, and calibration summary
-- can open a real GitHub PR after local artifact verification passes
+- can open a real GitHub PR after a live run produces an intervention and local artifact verification passes
 
 What it does not claim:
 
@@ -100,20 +115,23 @@ What it does not claim:
 - automatic merge
 - statistically meaningful precision before human-labeled outcomes exist
 - live loop reproduction on every provider prompt
+- fixture evidence as final submission proof
 
 V1 is an advisory circuit breaker: observe, detect, record, propose. Humans
 still review and merge.
 
 ## Final Gates
 
-The current branch has passed:
+Current local regression/build gates:
 
 - `npm run build`
 - `npm test`
 - `examples/circuit-breaker/demo.sh`
-- Groq `examples/circuit-breaker/live-proof.sh`
-- GitHub PR proof
 - `git diff --check`
-- `npm audit --json`
-- `npm audit signatures`
 - `npm pack --dry-run`
+- no PR when evidence is below threshold
+
+Real-only submission gates passed:
+
+- `examples/circuit-breaker/live-proof.sh` with a real Groq provider key
+- `examples/circuit-breaker/pr-proof.sh` with a real Groq provider key, `GITHUB_TOKEN`, and `GITHUB_REPO`

@@ -314,8 +314,9 @@ action: propose_budget_guardrail
 If there are fewer than five baseline samples, do not call it a statistical anomaly. Call it an "absolute budget warning" only if it crosses the floor.
 
 Cost spike is supporting evidence in the five-minute demo, not the main proof.
-The main proof should be the deterministic tool-loop detector because it works
-with one captured run. Cost baselines become stronger after repeated real runs.
+The regression proof should keep the tool-loop detector deterministic; the
+submission proof should come from a live SDK/provider run. Cost baselines become
+stronger after repeated real runs.
 Once a cost spike has at least five baseline samples, it can produce a targeted
 `RULES.md` cost guardrail PR. Low-sample absolute budget warnings remain
 evidence only. Do not patch `agent.yaml` with budget keys unless GitClaw runtime
@@ -335,7 +336,7 @@ Write one YAML record per intervention:
 ```yaml
 id: 2026-05-23T11-20-00Z-tool-loop-v1
 session_id: gitclaw/session-abc123
-agent: research-agent
+agent: assistant
 model: anthropic:claude-sonnet-4-5-20250929
 rules_hash: abc12345
 detector: tool-loop-v1
@@ -439,33 +440,31 @@ The example can be run in fixture mode or live mode.
 examples/circuit-breaker/demo.sh
 
 # Live mode around a real GitClaw run
-AGENT_DIR=./agents/research-agent \
-PROMPT="Research the same narrow topic until you have ten unique sources" \
-REQUIRE_INTERVENTION=1 \
+AGENT_DIR=./agents/assistant \
+PROMPT="Use one or two tool calls to inspect this repo and summarize what changed." \
+REQUIRE_INTERVENTION=0 \
 examples/circuit-breaker/live-proof.sh
 
-# Live PR mode after dry-run evidence is correct
-# Set GITHUB_TOKEN in your shell or secret manager before running this.
-GITHUB_REPO=YOUR_USERNAME/research-agent \
-AGENT_DIR=./agents/research-agent \
-PROMPT="Research the same narrow topic until you have ten unique sources" \
+# Live PR proof after live evidence is correct
+# Set GITHUB_TOKEN and the selected provider key in your shell or secret manager before running this.
+GITHUB_REPO=YOUR_USERNAME/gitclaw-demo-agent \
 examples/circuit-breaker/pr-proof.sh
 ```
 
 `--dry-run` means write the intervention record and PR body locally, but do not open a GitHub PR.
 
-`--open-pr` can be used only after dry-run evidence is correct. The command first
-writes local evidence, intervention YAML, patch, and PR-body artifacts; then it
-creates or reuses a GitHub branch and PR through the GitHub REST API.
+`--open-pr` can be used only after live evidence is correct. The PR proof script
+is live-only: it captures a real GitClaw SDK run and refuses to open a PR when
+no intervention is detected.
 
 `verify-artifacts.ts` is the proof gate for demos. It checks session JSONL event
 indexes, intervention evidence references, patch/PR-body artifacts, and
 calibration output.
 
 `examples/circuit-breaker/PROOF.md` is the reviewer-facing evidence summary. It
-keeps the ambition intact while making the proof boundary explicit:
-deterministic detector proof, live SDK/provider capture, and real PR
-intervention are three views of one product chain, not three disconnected demos.
+keeps the ambition intact while making the real-only submission boundary explicit:
+regression detector checks, live SDK/provider capture, and live PR intervention
+are three views of one product chain, not three disconnected demos.
 
 ## 9. Validation Checklist
 
@@ -487,7 +486,7 @@ Before showing this as an assignment/demo:
 - secrets are never written to git
 - PR patch is targeted to the failure surface and touches only intended files
 - live PR mode creates/reuses a branch and PR only after local artifacts exist
-- README explains fixture evidence versus live evidence
+- README explains fixture evidence is regression only and live evidence is submission proof
 - demo scripts run artifact verification, not just the detector
 - live proof commands set an explicit output-token cap
 
@@ -501,7 +500,7 @@ Five-minute demo:
 4. Show the intervention YAML in `memory/circuit-breaker/interventions/`.
 5. Show `memory/circuit-breaker/calibration.md` and point out pending decisions are not counted as precision.
 6. Show the generated targeted patch and PR body.
-7. Optionally run `examples/circuit-breaker/pr-proof.sh` with a test repo and show the reviewable PR.
+7. Run `examples/circuit-breaker/pr-proof.sh` with a test repo and show the reviewable PR from live SDK evidence.
 8. Say: "The agent did not need a dashboard. The repo captured the behavior, the detector wrote evidence, and the fix is reviewable like code."
 
 ## 11. What Not To Build In V1

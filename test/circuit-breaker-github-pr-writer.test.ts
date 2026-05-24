@@ -1,9 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { openGitHubPrForPatch, parseGitHubRepository, GitHubPrError } from "../examples/circuit-breaker/github-pr-writer.ts";
 import type { CircuitBreakerIntervention } from "../examples/circuit-breaker/intervention-writer.ts";
 import { planPatchForIntervention, renderGuardrailBlock } from "../examples/circuit-breaker/patch-planner.ts";
+
+const TEST_GITHUB_AUTH = "unit-test-auth";
 
 describe("circuit breaker GitHub PR writer", () => {
 	it("creates a branch, updates the target file, and opens a PR", async () => {
@@ -12,7 +17,7 @@ describe("circuit breaker GitHub PR writer", () => {
 		const patchPlan = planPatchForIntervention(intervention);
 
 		const result = await openGitHubPrForPatch({
-			"token": "gh-test-token",
+			token: TEST_GITHUB_AUTH,
 			repository: "vasu/research-agent",
 			intervention,
 			patchPlan,
@@ -62,7 +67,7 @@ describe("circuit breaker GitHub PR writer", () => {
 		const existingContent = `# Rules\n\n${renderGuardrailBlock(intervention)}`;
 
 		const result = await openGitHubPrForPatch({
-			"token": "gh-test-token",
+			token: TEST_GITHUB_AUTH,
 			repository: "vasu/research-agent",
 			intervention,
 			patchPlan,
@@ -80,6 +85,42 @@ describe("circuit breaker GitHub PR writer", () => {
 			"POST /repos/vasu/research-agent/pulls",
 			"GET /repos/vasu/research-agent/pulls?state=open&head=vasu%3Acircuit-breaker%2Fexisting&base=main",
 		]);
+	});
+
+	it("persists the PR rate-limit marker under the artifact root", async () => {
+		const rootDir = await mkdtemp(join(tmpdir(), "gitclaw-cb-pr-writer-"));
+		const calls: CapturedCall[] = [];
+		const intervention = makeIntervention();
+
+		await openGitHubPrForPatch({
+			token: TEST_GITHUB_AUTH,
+			repository: "vasu/research-agent",
+			intervention,
+			patchPlan: planPatchForIntervention(intervention),
+			branchName: "circuit-breaker/rate-limited",
+			fetchImpl: mockFetch(calls),
+			artifactRootDir: rootDir,
+			enforceRateLimit: true,
+		});
+
+		const markerPath = join(rootDir, "memory", "circuit-breaker", ".last_pr_timestamp");
+		assert.equal(Number.isFinite(Number(await readFile(markerPath, "utf8"))), true);
+
+		const blockedCalls: CapturedCall[] = [];
+		await assert.rejects(
+			() => openGitHubPrForPatch({
+				token: TEST_GITHUB_AUTH,
+				repository: "vasu/research-agent",
+				intervention,
+				patchPlan: planPatchForIntervention(intervention),
+				branchName: "circuit-breaker/blocked-by-rate-limit",
+				fetchImpl: mockFetch(blockedCalls),
+				artifactRootDir: rootDir,
+				enforceRateLimit: true,
+			}),
+			/Rate limit exceeded/,
+		);
+		assert.deepEqual(blockedCalls, []);
 	});
 
 	it("validates repository and token before network writes", async () => {

@@ -1,7 +1,7 @@
 # GitClaw Documentation
 
 > **GitClaw** — A universal git-native multimodal always-learning AI Agent
-> Version 1.3.3 | MIT License | [github.com/open-gitagent/gitclaw](https://github.com/open-gitagent/gitclaw)
+> Version 1.5.0 | MIT License | [github.com/open-gitagent/gitclaw](https://github.com/open-gitagent/gitclaw)
 
 ---
 

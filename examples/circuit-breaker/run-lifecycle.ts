@@ -86,6 +86,10 @@ export async function executeCircuitBreakerRun(
 			};
 		}
 
+		if (options.openPr) {
+			throw new Error("--open-pr requires a detected intervention; no tool loop or cost anomaly was found");
+		}
+
 		const calibration = await updateCalibration(rootDir);
 		return {
 			sessionId: options.sessionId,
@@ -148,13 +152,14 @@ async function writeInterventionArtifacts(input: {
 			requirePrBody: true,
 		});
 		githubPr = await openGitHubPrForPatch({
-			"token": options.githubToken ?? process.env.GITHUB_TOKEN ?? "",
+			token: options.githubToken ?? process.env.GITHUB_TOKEN ?? "",
 			repository: options.githubRepository ?? process.env.TARGET_GITHUB_REPOSITORY ?? process.env.GITHUB_REPOSITORY ?? "",
 			intervention,
 			patchPlan,
 			baseBranch: options.baseBranch,
 			branchName: options.branchName,
 			fetchImpl: options.fetchImpl,
+			artifactRootDir: rootDir,
 		});
 		await writeFile(patchPath, githubPr.patch, "utf8");
 		await writeFile(prBodyPath, githubPr.prBody, "utf8");

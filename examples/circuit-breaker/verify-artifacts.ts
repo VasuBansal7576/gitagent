@@ -100,7 +100,12 @@ async function readSessionJsonl(path: string, expectedSessionId: string): Promis
 	if (lines.length === 0) throw new Error(`Session JSONL is empty: ${path}`);
 
 	return lines.map((line, index) => {
-		const event = JSON.parse(line) as PersistedEventShape;
+		let event: PersistedEventShape;
+		try {
+			event = JSON.parse(line) as PersistedEventShape;
+		} catch (error) {
+			throw new Error(`Invalid JSON in session JSONL ${path} at line ${index + 1}: ${(error as Error).message}`);
+		}
 		if (event.sessionId !== expectedSessionId) {
 			throw new Error(`Session id mismatch in ${path}: expected ${expectedSessionId}, got ${event.sessionId}`);
 		}
@@ -154,17 +159,26 @@ async function listFiles(dir: string, suffix: string): Promise<string[]> {
 
 function parseArgs(argv: string[]): VerifyArtifactOptions {
 	const options: VerifyArtifactOptions = {};
+	const getValue = (index: number, argName: string): string => {
+		const value = argv[index + 1];
+		if (!value || value.startsWith("--")) throw new Error(`Missing value for argument: ${argName}`);
+		return value;
+	};
+
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
 		switch (arg) {
 			case "--root-dir":
-				options.rootDir = argv[++index];
+				options.rootDir = getValue(index, arg);
+				index += 1;
 				break;
 			case "--session-id":
-				options.sessionId = argv[++index];
+				options.sessionId = getValue(index, arg);
+				index += 1;
 				break;
 			case "--expect-interventions":
-				options.expectInterventions = Number(argv[++index]);
+				options.expectInterventions = parseNonNegativeInteger(getValue(index, arg), arg);
+				index += 1;
 				break;
 			case "--require-patch":
 				options.requirePatch = true;
@@ -180,6 +194,14 @@ function parseArgs(argv: string[]): VerifyArtifactOptions {
 		}
 	}
 	return options;
+}
+
+function parseNonNegativeInteger(raw: string, flag: string): number {
+	const parsed = Number(raw);
+	if (!Number.isInteger(parsed) || parsed < 0) {
+		throw new Error(`${flag} must be a non-negative integer`);
+	}
+	return parsed;
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

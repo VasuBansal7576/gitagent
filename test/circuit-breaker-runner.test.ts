@@ -1,13 +1,18 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 import { CircuitBreakerEventSchemaError } from "../examples/circuit-breaker/message-adapter.ts";
 import { runCircuitBreaker } from "../examples/circuit-breaker/run.ts";
 import { analyzeCostAndUpdateBaseline } from "../examples/circuit-breaker/cost-baseline.ts";
 import type { GCMessage } from "../src/sdk-types.ts";
+
+const TEST_GITHUB_AUTH = "unit-test-auth";
+const execFileAsync = promisify(execFile);
 
 describe("circuit breaker fixture runner", () => {
 	it("writes evidence, intervention, patch, and PR body for the loop fixture", async () => {
@@ -151,7 +156,7 @@ describe("circuit breaker fixture runner", () => {
 			fixture: "examples/circuit-breaker/fixtures/search-loop-session.json",
 			openPr: true,
 			githubRepository: "vasu/research-agent",
-			githubToken: "gh-test-token",
+			githubToken: TEST_GITHUB_AUTH,
 			branchName: "circuit-breaker/search-loop-session",
 			fetchImpl: githubFetch(calls),
 		});
@@ -202,7 +207,7 @@ describe("circuit breaker fixture runner", () => {
 				fixture: "examples/circuit-breaker/fixtures/search-loop-session.json",
 				openPr: true,
 				githubRepository: "vasu/research-agent",
-				githubToken: "gh-test-token",
+				githubToken: TEST_GITHUB_AUTH,
 				fetchImpl: async (input) => {
 					calls.push(String(input));
 					return json({});
@@ -212,6 +217,38 @@ describe("circuit breaker fixture runner", () => {
 		);
 
 		assert.deepEqual(calls, []);
+	});
+
+	it("refuses PR mode when a real run produces no intervention", async () => {
+		const rootDir = await tempRoot();
+
+		await assert.rejects(
+			() => runCircuitBreaker({
+				rootDir,
+				fixture: "examples/circuit-breaker/fixtures/normal-session.json",
+				openPr: true,
+				githubRepository: "vasu/research-agent",
+				githubToken: TEST_GITHUB_AUTH,
+			}),
+			/--open-pr requires a detected intervention/,
+		);
+	});
+
+	it("fails loudly when a CLI option is missing its value", async () => {
+		await assert.rejects(
+			() => execFileAsync(process.execPath, [
+				"--experimental-strip-types",
+				"examples/circuit-breaker/run.ts",
+				"--fixture",
+				"--dry-run",
+			]),
+			(error: unknown) => {
+				const cliError = error as { stderr?: string; code?: number };
+				assert.equal(cliError.code, 1);
+				assert.match(cliError.stderr ?? "", /Missing value for argument: --fixture/);
+				return true;
+			},
+		);
 	});
 });
 

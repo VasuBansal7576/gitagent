@@ -18,6 +18,7 @@
 
 <p align="center">
   <a href="#one-command-install">Install</a> &bull;
+  <a href="#reviewer-quickstart">Reviewer Quickstart</a> &bull;
   <a href="#quick-start">Quick Start</a> &bull;
   <a href="#sdk">SDK</a> &bull;
   <a href="#architecture">Architecture</a> &bull;
@@ -28,6 +29,28 @@
 </p>
 
 ---
+
+## Reviewer Quickstart
+
+For code review or challenge evaluation, start from the GitHub repository, not
+the npm package. The package ships the runtime; the repo contains the
+circuit-breaker proof scripts, fixtures, spec, and proof report.
+
+```bash
+git clone https://github.com/VasuBansal7576/gitagent.git
+cd gitagent
+npm ci
+npm run build
+npm test
+examples/circuit-breaker/demo.sh
+```
+
+Then read:
+
+- [Circuit Breaker README](./examples/circuit-breaker/README.md)
+- [Circuit Breaker Architecture](./examples/circuit-breaker/ARCHITECTURE.md)
+- [Proof Report](./examples/circuit-breaker/PROOF.md)
+- [Build Spec](./SPEC.md)
 
 ## Why Gitclaw?
 
@@ -70,6 +93,7 @@ The proof chain is deliberately git-native:
 Reviewer entry points:
 
 - [Circuit Breaker README](./examples/circuit-breaker/README.md)
+- [Circuit Breaker Architecture](./examples/circuit-breaker/ARCHITECTURE.md)
 - [Proof Report](./examples/circuit-breaker/PROOF.md)
 - [Build Spec](./SPEC.md)
 
@@ -86,7 +110,7 @@ This will:
 - Walk you through API key setup (Quick or Advanced mode)
 - Launch the voice UI in your browser at `http://localhost:3333`
 
-> **Requirements:** Node.js 18+, npm, git
+> **Requirements:** Node.js 20+, npm, git
 
 ### Or install manually:
 
@@ -99,7 +123,7 @@ npm install -g gitclaw
 **Run your first agent in one line:**
 
 ```bash
-export OPENAI_API_KEY="sk-..."
+export OPENAI_API_KEY=your-openai-api-key
 gitclaw --dir ~/my-project "Explain this project and suggest improvements"
 ```
 
@@ -170,7 +194,7 @@ for await (const msg of query({
   model: "openai:gpt-4o-mini",
   repo: {
     url: "https://github.com/org/repo",
-    "token": process.env.GITHUB_TOKEN!,
+    token: process.env.GITHUB_TOKEN!,
   },
 })) {
   if (msg.type === "delta") process.stdout.write(msg.content);
@@ -544,7 +568,7 @@ plugins:
     source: https://github.com/org/my-plugin.git  # Auto-install on load
     version: main                                   # Git branch/tag
     config:
-      api_key: "${MY_API_KEY}"                      # Supports env interpolation
+      api_key: ${MY_API_KEY}                        # Supports env interpolation
       timeout: 60
 ```
 
@@ -798,7 +822,7 @@ Your agent lives in a git repository with structured files:
 ### Installation & Setup
 
 **What are the requirements?**
-Node.js 18+ (or 20+ recommended), npm, and git. Install globally with `npm install -g gitclaw`.
+Node.js 20+, npm, and git. Install globally with `npm install -g gitclaw`.
 
 **How do I set up API keys?**
 Run the installer for guided setup:
@@ -807,7 +831,7 @@ bash <(curl -fsSL "https://raw.githubusercontent.com/open-gitagent/gitagent/main
 ```
 Or set manually:
 ```bash
-export OPENAI_API_KEY="sk-..."
+export OPENAI_API_KEY=your-openai-api-key
 ```
 
 **Which LLM providers are supported?**

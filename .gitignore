@@ -3,6 +3,8 @@ dist/
 pi-mono/
 .claude/
 .gitagent/
+**/.gitagent/
+.planning/
 .gitagent/whatsapp-auth/
 *.tgz
 snake-game.html

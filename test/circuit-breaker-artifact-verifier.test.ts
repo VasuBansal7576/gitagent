@@ -67,6 +67,18 @@ describe("circuit breaker artifact verifier", () => {
 		);
 	});
 
+	it("fails loudly on malformed session JSONL", async () => {
+		const rootDir = await tempRoot();
+		const sessionDir = join(rootDir, "memory", "circuit-breaker", "sessions");
+		await mkdir(sessionDir, { recursive: true });
+		await writeFile(join(sessionDir, "malformed-session.jsonl"), "{not-json}\n", "utf8");
+
+		await assert.rejects(
+			() => verifyCircuitBreakerArtifacts({ rootDir, sessionId: "malformed-session" }),
+			/Invalid JSON in session JSONL .* line 1/,
+		);
+	});
+
 	it("fails when an intervention points at a different session log than its session id", async () => {
 		const rootDir = await tempRoot();
 		const sessionDir = join(rootDir, "memory", "circuit-breaker", "sessions");

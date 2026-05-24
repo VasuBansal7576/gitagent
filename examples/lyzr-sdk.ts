@@ -3,7 +3,7 @@
  *
  * Prerequisites:
  *   1. Set your Lyzr API key in the shell or a secret manager.
- *   2. Set a dummy OpenAI key (needed by pi-ai): export OPENAI_API_KEY="dummy"
+ *   2. Set a dummy OpenAI key if needed by pi-ai: export OPENAI_API_KEY=dummy
  *   3. Have an agent directory with agent.yaml: ~/assistant/
  *
  * Run:

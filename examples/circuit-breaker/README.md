@@ -15,14 +15,14 @@ repeat the incident.
 
 The idea is intentionally not reduced to "just tests" or "just a PR bot":
 
-- fixture mode proves deterministic detector behavior without LLM variance
-- live mode proves the same adapter observes real GitClaw SDK/provider events
-- PR mode proves an intervention can leave the local machine as a human-reviewed git change
+- fixture mode is regression coverage only; it is not submission proof
+- live mode proves the adapter observes real GitClaw SDK/provider events
+- live PR mode proves an intervention from a real run can leave the local machine as a human-reviewed git change
 - calibration records keep the system honest after humans merge or reject interventions
 
 ## Start Here
 
-Run the deterministic proof first:
+Run the regression proof first:
 
 ```bash
 examples/circuit-breaker/demo.sh
@@ -55,20 +55,22 @@ The shortest demo story is:
 2. The circuit breaker normalizes those events and writes session JSONL.
 3. The detector cites exact event indexes when repeated low-progress tool calls appear.
 4. The intervention writes YAML, a patch, and PR body text.
-5. Optional PR proof sends that patch to GitHub for human review.
+5. Live PR proof sends that patch to GitHub for human review.
 
-Cost anomaly is included, but v1's strongest proof is deterministic loop detection.
+Cost anomaly is included, but v1's submission proof is live SDK capture plus live PR flow.
 Calibration starts honest: pending human decisions are not counted as precision.
 
 ## Proof Matrix
 
 | Proof | Command | What it proves |
 |---|---|---|
-| Deterministic incident | `examples/circuit-breaker/demo.sh` | loop detection, evidence indexes, intervention YAML, patch, PR body, calibration |
+| Regression incident | `examples/circuit-breaker/demo.sh` | detector and artifact checks stay deterministic across changes; not submission proof |
 | Live SDK/provider capture | `MODEL=groq:llama-3.3-70b-versatile NO_TOOLS=1 MAX_TOKENS=128 examples/circuit-breaker/live-proof.sh` | real GitClaw `query()` stream and real provider usage captured into session JSONL |
-| Real PR path | `GITHUB_REPO=OWNER/REPO examples/circuit-breaker/pr-proof.sh` | branch creation, target-file patching, PR creation/reuse, intervention record updated with PR URL |
+| Live PR path | `GITHUB_REPO=OWNER/REPO GITHUB_TOKEN=... examples/circuit-breaker/pr-proof.sh` | real SDK capture drives branch creation, target-file patching, PR creation/reuse, and intervention record update |
 
 See [PROOF.md](./PROOF.md) for the latest evidence run and exact artifact map.
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for the component map, design
+decisions, risk register, and reviewer checklist.
 
 ## What It Proves
 
@@ -84,7 +86,8 @@ See [PROOF.md](./PROOF.md) for the latest evidence run and exact artifact map.
 
 ## Fixture Mode
 
-Fixture mode is deterministic regression evidence. It does not call an LLM.
+Fixture mode is deterministic regression coverage. It does not call an LLM and
+does not count as submission proof.
 
 One-command fixture demo:
 
@@ -136,10 +139,10 @@ Live mode captures a real GitClaw SDK run. This is the product proof path.
 ```bash
 npm run build
 node --experimental-strip-types examples/circuit-breaker/run.ts \
-  --agent-dir ./agents/research-agent \
-  --agent-name research-agent \
+  --agent-dir ./agents/assistant \
+  --agent-name assistant \
   --model groq:llama-3.3-70b-versatile \
-  --prompt "Research the same narrow topic until you have ten unique sources" \
+  --prompt "Use one or two tool calls to inspect this repo and summarize what changed." \
   --session-id demo-live-run \
   --max-tokens 2048 \
   --dry-run
@@ -154,9 +157,9 @@ sending the built-in tool schemas to a low free-tier TPM provider.
 For repeatable live proof, use:
 
 ```bash
-AGENT_DIR=./agents/research-agent \
-PROMPT="Research the same narrow topic until you have ten unique sources" \
-REQUIRE_INTERVENTION=1 \
+AGENT_DIR=./agents/assistant \
+PROMPT="Use one or two tool calls to inspect this repo and summarize what changed." \
+REQUIRE_INTERVENTION=0 \
 MAX_TOKENS=2048 \
 examples/circuit-breaker/live-proof.sh
 ```
@@ -166,20 +169,20 @@ Set it to `1` when the chosen agent/prompt is expected to produce an interventio
 
 ## Live PR Mode
 
-Live PR mode keeps the dry-run proof step, then uses the GitHub REST API to
-create a branch, patch the target file, and open or reuse a PR.
+Live PR mode runs a real SDK capture, writes evidence, then uses the GitHub REST
+API to create a branch, patch the target file, and open or reuse a PR.
 
 ```bash
 # Set GITHUB_TOKEN in your shell or secret manager before running this.
 
 node --experimental-strip-types examples/circuit-breaker/run.ts \
-  --agent-dir ./agents/research-agent \
-  --agent-name research-agent \
-  --prompt "Research the same narrow topic until you have ten unique sources" \
+  --agent-dir ./agents/assistant \
+  --agent-name assistant \
+  --prompt "Use one or two tool calls to inspect this repo and summarize what changed." \
   --session-id demo-live-run \
   --max-tokens 2048 \
   --open-pr \
-  --github-repo YOUR_USERNAME/research-agent \
+  --github-repo YOUR_USERNAME/gitclaw-demo-agent \
   --base-branch main
 ```
 
@@ -190,13 +193,18 @@ exist does it call GitHub.
 For an explicit PR proof on a demo repository:
 
 ```bash
-# Set GITHUB_TOKEN in your shell or secret manager before running this.
-GITHUB_REPO=YOUR_USERNAME/research-agent \
-AGENT_DIR=./agents/research-agent \
-PROMPT="Research the same narrow topic until you have ten unique sources" \
-MAX_TOKENS=2048 \
+# Set GITHUB_TOKEN and the selected model/provider key in your shell or secret manager.
+GITHUB_REPO=YOUR_USERNAME/gitclaw-demo-agent \
 examples/circuit-breaker/pr-proof.sh
 ```
+
+`pr-proof.sh` is live-only. If the run produces no intervention, it fails before
+opening a PR. That is intentional: regression fixtures are useful for tests, but
+the submission proof must come from a real GitClaw SDK/provider run. The default
+agent is `examples/circuit-breaker/live-agent`, a bounded proof harness that
+asks a real provider to repeat the same read-only tool call against
+`EVIDENCE.md` so the circuit breaker has stable evidence IDs to catch without
+modifying files before the PR step.
 
 `pr-proof.sh` has an external side effect: it creates or reuses a real GitHub
 branch and PR. Use a throwaway/demo repository when presenting this.
@@ -227,7 +235,7 @@ variables or CLI args and are never written into evidence artifacts.
 
 ## Trust Boundary
 
-Fixture evidence proves deterministic detection behavior.
+Fixture evidence proves deterministic detection behavior for regression only.
 
 Live evidence proves the example can observe GitClaw SDK events from a real run.
 Live PR mode proves the proposed fix can leave the local repo and become a

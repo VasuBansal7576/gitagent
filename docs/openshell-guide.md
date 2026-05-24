@@ -226,8 +226,8 @@ Pass API keys when creating the sandbox:
 ```bash
 openshell sandbox create \
   --from ./sandboxes/gitclaw \
-  --env OPENAI_API_KEY="$OPENAI_API_KEY" \
-  --env ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+  --env OPENAI_API_KEY \
+  --env ANTHROPIC_API_KEY \
   --forward 3333 \
   --name gitclaw-dev
 ```

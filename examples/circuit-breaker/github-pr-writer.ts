@@ -1,8 +1,8 @@
 import type { CircuitBreakerIntervention } from "./intervention-writer.ts";
 import type { PatchPlan } from "./patch-planner.ts";
 import { applyPatchPlanToContent, hydratePatchPlanWithContent } from "./patch-planner.ts";
-import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 export interface GitHubPrWriterOptions {
 	token: string;
@@ -13,6 +13,8 @@ export interface GitHubPrWriterOptions {
 	branchName?: string;
 	fetchImpl?: FetchLike;
 	apiBaseUrl?: string;
+	artifactRootDir?: string;
+	enforceRateLimit?: boolean;
 }
 
 export interface GitHubPrResult {
@@ -41,6 +43,10 @@ export class GitHubPrError extends Error {
 }
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+
+const PR_RATE_LIMIT_MS = 24 * 60 * 60 * 1000;
+const CIRCUIT_BREAKER_MEMORY_DIR = ["memory", "circuit-breaker"] as const;
+const LAST_PR_TIMESTAMP_FILE = ".last_pr_timestamp";
 
 interface GitRefResponse {
 	object: {
@@ -88,32 +94,18 @@ function redactSecrets(text: string): string {
 export async function openGitHubPrForPatch(options: GitHubPrWriterOptions): Promise<GitHubPrResult> {
 	validateOptions(options);
 
-	const lastPrFile = join(process.cwd(), "memory", "circuit-breaker", ".last_pr_timestamp");
-	let shouldRateLimit = false;
-	try {
-		const lastPrTimeStr = await readFile(lastPrFile, "utf8");
-		const lastPrTime = parseInt(lastPrTimeStr, 10);
-		if (!isNaN(lastPrTime) && Date.now() - lastPrTime < 24 * 60 * 60 * 1000) {
-			if (!options.fetchImpl || options.fetchImpl === globalThis.fetch.bind(globalThis)) {
-				shouldRateLimit = true;
-			}
-		}
-	} catch {
-		// Ignore
-	}
-
-	if (shouldRateLimit) {
+	const rateLimitState = resolvePrRateLimitState(options);
+	if (rateLimitState.enabled && await hasRecentPr(rateLimitState.filePath)) {
 		throw new GitHubPrError("Rate limit exceeded: only one automated PR is allowed every 24 hours.");
 	}
-
 	const baseBranch = options.baseBranch ?? "main";
 	const branchName = options.branchName ?? defaultBranchName(options.intervention);
 	const repo = parseGitHubRepository(options.repository);
-		const api = new GitHubApi({
-			"token": options.token,
-			apiBaseUrl: options.apiBaseUrl ?? "https://api.github.com",
-			fetchImpl: options.fetchImpl ?? globalThis.fetch.bind(globalThis),
-		});
+	const api = new GitHubApi({
+		token: options.token,
+		apiBaseUrl: options.apiBaseUrl ?? "https://api.github.com",
+		fetchImpl: options.fetchImpl ?? globalThis.fetch.bind(globalThis),
+	});
 
 	const baseRef = await api.getJson<GitRefResponse>(
 		`/repos/${repo.owner}/${repo.name}/git/ref/heads/${encodeURIComponent(baseBranch)}`,
@@ -151,7 +143,9 @@ export async function openGitHubPrForPatch(options: GitHubPrWriterOptions): Prom
 		base: baseBranch,
 	});
 
-	await writeFile(lastPrFile, Date.now().toString(), "utf8").catch(() => {});
+	if (rateLimitState.enabled) {
+		await writePrTimestamp(rateLimitState.filePath);
+	}
 
 	return {
 		url: pull.html_url,
@@ -165,6 +159,29 @@ export async function openGitHubPrForPatch(options: GitHubPrWriterOptions): Prom
 		prTitle: effectivePatchPlan.prTitle,
 		prBody: effectivePatchPlan.prBody,
 	};
+}
+
+function resolvePrRateLimitState(options: GitHubPrWriterOptions): { enabled: boolean; filePath: string } {
+	const rootDir = options.artifactRootDir ?? process.cwd();
+	return {
+		enabled: options.enforceRateLimit ?? !options.fetchImpl,
+		filePath: join(rootDir, ...CIRCUIT_BREAKER_MEMORY_DIR, LAST_PR_TIMESTAMP_FILE),
+	};
+}
+
+async function hasRecentPr(path: string): Promise<boolean> {
+	try {
+		const lastPrTime = Number(await readFile(path, "utf8"));
+		return Number.isFinite(lastPrTime) && Date.now() - lastPrTime < PR_RATE_LIMIT_MS;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+		throw error;
+	}
+}
+
+async function writePrTimestamp(path: string): Promise<void> {
+	await mkdir(dirname(path), { recursive: true });
+	await writeFile(path, Date.now().toString(), "utf8");
 }
 
 export function parseGitHubRepository(repository: string): { owner: string; name: string } {

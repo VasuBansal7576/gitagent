@@ -1,0 +1,16 @@
+spec_version: "0.1.0"
+name: circuit-breaker-live-agent
+version: 1.0.0
+description: Live proof harness for GitClaw circuit-breaker intervention flow
+
+model:
+  preferred: "groq:llama-3.3-70b-versatile"
+  constraints:
+    temperature: 0
+    max_tokens: 2048
+
+tools: [read]
+
+runtime:
+  max_turns: 8
+  timeout: 120

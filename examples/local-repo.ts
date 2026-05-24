@@ -5,7 +5,7 @@ import { query } from "../dist/exports.js";
  * auto-commit changes, and push to a session branch.
  *
  * Usage:
- *   GITHUB_TOKEN="$GITHUB_TOKEN" npx tsx examples/local-repo.ts
+ *   GITHUB_TOKEN=your-token npx tsx examples/local-repo.ts
  */
 
 const REPO_URL = "https://github.com/shreyas-lyzr/agent-designer";
@@ -24,7 +24,7 @@ async function main() {
 		model: "openai:gpt-4o-mini",
 		repo: {
 			url: REPO_URL,
-			"token": accessToken,
+			token: accessToken,
 			// dir: "/tmp/my-custom-dir",  // optional — defaults to cwd
 			// session: "gitclaw/session-abc123",  // resume an existing session
 		},
