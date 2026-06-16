@@ -17,10 +17,13 @@ import { formatComplianceWarnings } from "./compliance.js";
 import { readFile, mkdir, writeFile, stat, access } from "fs/promises";
 import { existsSync, readFileSync } from "fs";
 import { join, resolve } from "path";
+import { homedir } from "os";
 import { execSync } from "child_process";
 import { initLocalSession } from "./session.js";
 import type { LocalSession } from "./session.js";
-import { startVoiceServer } from "./voice/server.js";
+// Voice mode is shipped as an optional sibling package (@open-gitagent/voice).
+// Imported dynamically below so the slim core has no static dependency on it —
+// users without voice get a clean install + a clear error if they try --voice.
 import { handlePluginCommand } from "./plugin-cli.js";
 import { context as otelContext } from "@opentelemetry/api";
 import {
@@ -251,7 +254,7 @@ async function ensureRepo(dir: string, model?: string): Promise<string> {
 			'spec_version: "0.1.0"',
 			`name: ${agentName}`,
 			"version: 0.1.0",
-			`description: Gitclaw agent for ${agentName}`,
+			`description: Gitagent agent for ${agentName}`,
 			"model:",
 			`  preferred: "${defaultModel}"`,
 			"  fallback: []",
@@ -295,7 +298,7 @@ async function ensureRepo(dir: string, model?: string): Promise<string> {
 
 	// Stage new scaffolded files
 	try {
-		execSync("git add -A && git diff --cached --quiet || git commit -m 'Scaffold gitclaw agent'", {
+		execSync("git add -A && git diff --cached --quiet || git commit -m 'Scaffold gitagent agent'", {
 			cwd: absDir,
 			stdio: "pipe",
 		});
@@ -307,7 +310,7 @@ async function ensureRepo(dir: string, model?: string): Promise<string> {
 }
 
 async function main(): Promise<void> {
-	// Handle plugin subcommand: gitclaw plugin <install|list|remove|...>
+	// Handle plugin subcommand: gitagent plugin <install|list|remove|...>
 	if (process.argv[2] === "plugin") {
 		const allArgs = process.argv.slice(3);
 		let agentDir = process.cwd();
@@ -342,10 +345,10 @@ async function main(): Promise<void> {
 			process.exit(1);
 		}
 
-		// Default dir: /tmp/gitclaw/<repo-name> if no --dir given
+		// Default dir: /tmp/gitagent/<repo-name> if no --dir given
 		if (dir === process.cwd()) {
 			const repoName = repo.split("/").pop()?.replace(/\.git$/, "") || "repo";
-			dir = resolve(`/tmp/gitclaw/${repoName}`);
+			dir = resolve(`/tmp/gitagent/${repoName}`);
 		}
 
 		localSession = initLocalSession({
@@ -372,7 +375,7 @@ async function main(): Promise<void> {
 		console.log(dim(`Sandbox ready (repo: ${sandboxCtx.repoPath})`));
 	}
 
-	// Ensure the target is a valid gitclaw repo (skip in sandbox/local-repo mode)
+	// Ensure the target is a valid gitagent repo (skip in sandbox/local-repo mode)
 	if (localSession) {
 		// Already cloned and scaffolded by initLocalSession
 	} else if (!useSandbox) {
@@ -381,28 +384,50 @@ async function main(): Promise<void> {
 		dir = resolve(dir);
 	}
 
-	// Load .env from agent directory so API keys are available before voice init
-	const envPath = resolve(dir, ".env");
-	if (existsSync(envPath)) {
+	// Env precedence (lowest → highest): inherited env → ~/.gitagent/.env (global fallback) → agent-dir .env (winner).
+	// loadEnvPath is called in that order so the LAST source wins; agent .env still beats a shell placeholder.
+	const loadEnvPath = (envPath: string): void => {
+		if (!existsSync(envPath)) return;
 		const envContent = readFileSync(envPath, "utf-8");
-		for (const line of envContent.split("\n")) {
+		for (const rawLine of envContent.split("\n")) {
+			const line = rawLine.trim();
+			if (!line || line.startsWith("#")) continue;
 			const eq = line.indexOf("=");
 			if (eq <= 0) continue;
 			const key = line.slice(0, eq).trim();
-			const val = line.slice(eq + 1).trim();
-			if (!process.env[key]) {
-				process.env[key] = val;
+			let val = line.slice(eq + 1).trim();
+			if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+				val = val.slice(1, -1);
 			}
+			process.env[key] = val;
 		}
-	}
+	};
+	loadEnvPath(join(homedir(), ".gitagent", ".env"));
+	loadEnvPath(resolve(dir, ".env"));
 
 	// Auto-init telemetry after .env is loaded so OTEL_* vars set in .env are picked up.
-	if ((process.env.OTEL_EXPORTER_OTLP_ENDPOINT || process.env.OTEL_TRACES_EXPORTER === "console") && process.env.GITCLAW_OTEL_ENABLED !== "false") {
+	if ((process.env.OTEL_EXPORTER_OTLP_ENDPOINT || process.env.OTEL_TRACES_EXPORTER === "console") && process.env.GITAGENT_OTEL_ENABLED !== "false") {
 		await initTelemetry({});
 	}
 
-	// Voice mode
+	// Voice mode — dynamically load the @open-gitagent/voice package.
+	// Core ships without voice so the published tarball stays slim and supply-chain
+	// scanners don't reject it. If the user passes --voice without voice installed,
+	// we print an install hint and exit cleanly.
 	if (voice) {
+		let voiceMod: { startVoiceServer: (opts: any) => Promise<() => Promise<void>> };
+		try {
+			// @ts-ignore — peer/optional package, not in core's dependencies
+			voiceMod = await import("@open-gitagent/voice");
+		} catch {
+			console.error(red("\nVoice mode lives in a separate optional package."));
+			console.error("Install it once globally:\n");
+			console.error("  " + bold("npm install -g @open-gitagent/voice") + "\n");
+			console.error(dim("Then rerun: gitagent --voice -d <agent-dir>"));
+			console.error(dim("Or use install.sh, which installs both packages by default."));
+			process.exit(1);
+		}
+
 		let adapterBackend: "openai-realtime" | "gemini-live";
 		let providerCredential: string | undefined;
 
@@ -420,7 +445,7 @@ async function main(): Promise<void> {
 			}
 		}
 
-		const cleanup = await startVoiceServer({
+		const cleanup = await voiceMod.startVoiceServer({
 			adapter: adapterBackend,
 			adapterConfig: { "apiKey": providerCredential },
 			agentDir: dir,
@@ -554,8 +579,8 @@ async function main(): Promise<void> {
 	const modelOptions = buildModelOptionsFromConstraints(manifest.model.constraints);
 
 	// OpenTelemetry session span — covers the whole CLI lifetime.
-	const _session = startSessionSpan("gitclaw.agent.session", {
-		"gitclaw.entry": "cli",
+	const _session = startSessionSpan("gitagent.agent.session", {
+		"gitagent.entry": "cli",
 	});
 	let _llmCallStart = 0;
 	let _totalCostUsd = 0;
@@ -634,7 +659,7 @@ async function main(): Promise<void> {
 				await sandboxCtx.gitMachine.stop();
 			}
 			try {
-				_session.end({ "gitclaw.cost_usd": _totalCostUsd });
+				_session.end({ "gitagent.cost_usd": _totalCostUsd });
 			} catch {
 				/* ignore */
 			}
@@ -665,7 +690,7 @@ async function main(): Promise<void> {
 				}
 				await stopSandbox();
 				try {
-					_session.end({ "gitclaw.cost_usd": _totalCostUsd });
+					_session.end({ "gitagent.cost_usd": _totalCostUsd });
 				} catch {
 					/* ignore */
 				}
@@ -808,7 +833,7 @@ async function main(): Promise<void> {
 				try { localSession.finalize(); } catch { /* best-effort */ }
 			}
 			try {
-				_session.end({ "gitclaw.cost_usd": _totalCostUsd });
+				_session.end({ "gitagent.cost_usd": _totalCostUsd });
 			} catch { /* ignore */ }
 			stopSandbox().finally(() => process.exit(0));
 		}

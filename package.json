@@ -1,14 +1,14 @@
 {
-  "name": "gitclaw",
-  "version": "1.5.0",
+  "name": "@open-gitagent/gitagent",
+  "version": "2.0.0",
   "description": "A universal git-native multimodal always learning AI Agent (TinyHuman)",
   "author": "shreyaskapale",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/open-gitagent/gitclaw"
+    "url": "https://github.com/open-gitagent/gitagent"
   },
-  "homepage": "https://github.com/open-gitagent/gitclaw",
+  "homepage": "https://github.com/open-gitagent/gitagent",
   "keywords": [
     "ai",
     "agent",
@@ -20,12 +20,15 @@
   "type": "module",
   "files": [
     "dist",
-    "README.md"
+    "!dist/voice",
+    "!dist/composio",
+    "README.md",
+    "LICENSE"
   ],
   "main": "./dist/exports.js",
   "types": "./dist/exports.d.ts",
   "bin": {
-    "gitclaw": "./dist/index.js"
+    "gitagent": "./dist/index.js"
   },
   "exports": {
     ".": {
@@ -37,7 +40,7 @@
     }
   },
   "scripts": {
-    "build": "tsc && cp src/voice/ui.html dist/voice/",
+    "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "test": "node --test test/*.test.ts --experimental-strip-types"
@@ -51,6 +54,7 @@
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/exporter-metrics-otlp-http": "^0.218.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.218.0",
+    "@opentelemetry/instrumentation": "^0.218.0",
     "@opentelemetry/instrumentation-undici": "^0.28.0",
     "@opentelemetry/resources": "^2.7.0",
     "@opentelemetry/sdk-metrics": "^2.7.0",
@@ -60,17 +64,12 @@
     "@sinclair/typebox": "^0.34.49",
     "js-yaml": "^4.1.0",
     "node-cron": "^4.2.1",
-    "ws": "^8.21.0",
     "yaml": "^2.9.0"
   },
   "peerDependencies": {
-    "baileys": "^7.0.0-rc13",
     "gitmachine": ">=0.1.0"
   },
   "peerDependenciesMeta": {
-    "baileys": {
-      "optional": true
-    },
     "gitmachine": {
       "optional": true
     }
@@ -79,7 +78,6 @@
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.19.19",
     "@types/node-cron": "^3.0.11",
-    "@types/ws": "^8.18.1",
     "typescript": "^5.7.0"
   }
 }

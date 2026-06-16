@@ -1,7 +1,7 @@
 import { isAbsolute, relative, resolve } from "path";
 
 export const DEFAULT_VOICE_HOST = "127.0.0.1";
-export const CSRF_HEADER = "x-gitclaw-csrf";
+export const CSRF_HEADER = "x-gitagent-csrf";
 export const STATE_CHANGING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 export function resolveInsideRoot(root: string, requestedPath: string): string | null {
@@ -17,12 +17,12 @@ export function isLoopbackHost(host: string): boolean {
 }
 
 export function resolveVoiceHost(env: NodeJS.ProcessEnv = process.env): string {
-	return env.GITCLAW_HOST || DEFAULT_VOICE_HOST;
+	return env.GITAGENT_HOST || env.GITCLAW_HOST || DEFAULT_VOICE_HOST;
 }
 
 export function assertVoiceAuthConfig(host: string, hasPassword: boolean): void {
 	if (!hasPassword && !isLoopbackHost(host)) {
-		throw new Error("GITCLAW_PASSWORD is required when GITCLAW_HOST is not loopback");
+		throw new Error("GITAGENT_PASSWORD is required when GITAGENT_HOST is not loopback");
 	}
 }
 

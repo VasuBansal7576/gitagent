@@ -17,7 +17,7 @@ import { discoverSkills } from "./skills.js";
 import type { SkillMetadata } from "./skills.js";
 
 const require = createRequire(import.meta.url);
-const { version: GITCLAW_VERSION } = require("../package.json");
+const { version: GITAGENT_VERSION } = require("../package.json");
 
 const KEBAB_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
@@ -186,8 +186,8 @@ async function loadPlugin(
 	if (!validatePluginManifest(manifest, pluginDir)) return null;
 
 	// Check engine compatibility
-	if (manifest.engine && !satisfiesEngine(manifest.engine, GITCLAW_VERSION)) {
-		console.warn(`Plugin "${manifest.id}": requires engine ${manifest.engine}, current is ${GITCLAW_VERSION}`);
+	if (manifest.engine && !satisfiesEngine(manifest.engine, GITAGENT_VERSION)) {
+		console.warn(`Plugin "${manifest.id}": requires engine ${manifest.engine}, current is ${GITAGENT_VERSION}`);
 		return null;
 	}
 
@@ -204,7 +204,7 @@ async function loadPlugin(
 	let hooks: HooksConfig | null = null;
 	if (manifest.provides?.hooks) {
 		const hooksDef: HooksConfig["hooks"] = {};
-		for (const event of ["on_session_start", "pre_tool_use", "post_response", "on_error"] as const) {
+		for (const event of ["on_session_start", "pre_tool_use", "post_tool_failure", "post_response", "pre_query", "file_changed", "on_error"] as const) {
 			const entries = manifest.provides.hooks[event];
 			if (entries && Array.isArray(entries)) {
 				hooksDef[event] = entries.map((e: any) => ({
@@ -295,8 +295,8 @@ async function discoverPluginDirs(
 	const localDir = join(agentDir, "plugins", pluginName);
 	if (await dirExists(localDir)) return localDir;
 
-	// 2. Global: ~/.gitclaw/plugins/<name>/
-	const globalDir = join(homedir(), ".gitclaw", "plugins", pluginName);
+	// 2. Global: ~/.gitagent/plugins/<name>/
+	const globalDir = join(homedir(), ".gitagent", "plugins", pluginName);
 	if (await dirExists(globalDir)) return globalDir;
 
 	// 3. Installed: <agent-dir>/.gitagent/plugins/<name>/
@@ -376,14 +376,17 @@ export function mergeHooksConfigs(
 		hooks: {
 			on_session_start: [...(base?.hooks.on_session_start || [])],
 			pre_tool_use: [...(base?.hooks.pre_tool_use || [])],
+			post_tool_failure: [...(base?.hooks.post_tool_failure || [])],
 			post_response: [...(base?.hooks.post_response || [])],
+			pre_query: [...(base?.hooks.pre_query || [])],
+			file_changed: [...(base?.hooks.file_changed || [])],
 			on_error: [...(base?.hooks.on_error || [])],
 		},
 	};
 
 	for (const plugin of plugins) {
 		if (!plugin.hooks) continue;
-		for (const event of ["on_session_start", "pre_tool_use", "post_response", "on_error"] as const) {
+		for (const event of ["on_session_start", "pre_tool_use", "post_tool_failure", "post_response", "pre_query", "file_changed", "on_error"] as const) {
 			const pluginHooks = plugin.hooks.hooks[event];
 			if (pluginHooks) {
 				merged.hooks[event] = [...(merged.hooks[event] || []), ...pluginHooks];
@@ -413,7 +416,7 @@ export async function listAllPlugins(
 
 	const scopes: Array<{ dir: string; scope: "local" | "global" | "installed" }> = [
 		{ dir: join(agentDir, "plugins"), scope: "local" },
-		{ dir: join(homedir(), ".gitclaw", "plugins"), scope: "global" },
+		{ dir: join(homedir(), ".gitagent", "plugins"), scope: "global" },
 		{ dir: join(gitagentDir, "plugins"), scope: "installed" },
 	];
 

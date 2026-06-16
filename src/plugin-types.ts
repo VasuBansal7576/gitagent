@@ -24,7 +24,10 @@ export interface PluginManifest {
 		hooks?: {
 			on_session_start?: Array<{ script: string; description?: string }>;
 			pre_tool_use?: Array<{ script: string; description?: string }>;
+			post_tool_failure?: Array<{ script: string; description?: string }>;
 			post_response?: Array<{ script: string; description?: string }>;
+			pre_query?: Array<{ script: string; description?: string }>;
+			file_changed?: Array<{ script: string; description?: string }>;
 			on_error?: Array<{ script: string; description?: string }>;
 		};
 		skills?: boolean;
@@ -35,7 +38,7 @@ export interface PluginManifest {
 		required?: string[];
 	};
 	entry?: string; // optional programmatic entry point (e.g., index.ts)
-	engine?: string; // min gitclaw version (e.g., ">=0.3.0")
+	engine?: string; // min gitagent version (e.g., ">=0.3.0")
 }
 
 // ── Plugin config in agent.yaml ────────────────────────────────────────

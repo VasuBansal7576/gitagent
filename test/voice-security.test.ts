@@ -8,27 +8,28 @@ import {
 	previewForLog,
 	resolveInsideRoot,
 	resolveVoiceHost,
-} from "../src/voice/security.ts";
+} from "../src/security.ts";
 
 describe("voice server security helpers", () => {
 	it("keeps requested file paths inside the agent root", () => {
-		const root = resolve("/tmp/gitclaw-agent");
+		const root = resolve("/tmp/gitagent-agent");
 
 		assert.equal(resolveInsideRoot(root, "workspace/report.md"), resolve(root, "workspace/report.md"));
 		assert.equal(resolveInsideRoot(root, "."), root);
-		assert.equal(resolveInsideRoot(root, "../gitclaw-agent-secret/.env"), null);
-		assert.equal(resolveInsideRoot(root, "/tmp/gitclaw-agent-secret/.env"), null);
+		assert.equal(resolveInsideRoot(root, "../gitagent-agent-secret/.env"), null);
+		assert.equal(resolveInsideRoot(root, "/tmp/gitagent-agent-secret/.env"), null);
 	});
 
 	it("binds voice server to loopback by default and requires auth for exposed hosts", () => {
 		assert.equal(resolveVoiceHost({}), "127.0.0.1");
+		assert.equal(resolveVoiceHost({ GITAGENT_HOST: "0.0.0.0" }), "0.0.0.0");
 		assert.equal(resolveVoiceHost({ GITCLAW_HOST: "0.0.0.0" }), "0.0.0.0");
 
 		assert.doesNotThrow(() => assertVoiceAuthConfig("127.0.0.1", false));
 		assert.doesNotThrow(() => assertVoiceAuthConfig("0.0.0.0", true));
 		assert.throws(
 			() => assertVoiceAuthConfig("0.0.0.0", false),
-			/GITCLAW_PASSWORD is required/,
+			/GITAGENT_PASSWORD is required/,
 		);
 	});
 
